@@ -109,6 +109,28 @@ brew install mongodb-community@7.0
 brew services start mongodb-community@7.0
 ```
 
+**Windows**
+
+**方式 A：使用 MSI 安裝程式（推薦）**
+
+1. 前往 [MongoDB 官方下載頁面](https://www.mongodb.com/try/download/community)
+2. 選擇 Windows 版本（建議選擇 `.msi` 格式）
+3. 執行安裝程式，選擇 "Complete" 安裝
+4. 安裝完成後，MongoDB 會自動啟動為 Windows 服務
+
+**方式 B：使用 Chocolatey**
+
+```powershell
+choco install mongodb
+```
+
+安裝完成後，手動啟動 MongoDB 服務：
+
+```powershell
+# 以系統管理員身份執行 PowerShell
+net start MongoDB
+```
+
 **Ubuntu**
 
 ```bash
@@ -129,7 +151,7 @@ PSEUDONYM_SALT=請在此輸入另一組隨機密碼
 MONGODB_URI=mongodb://localhost:27017
 MONGODB_DB_NAME=courses_system
 
-# Line Bot 配置 
+# Line Bot 配置
 LINE_CHANNEL_SECRET=your-line-channel-secret
 LINE_CHANNEL_ACCESS_TOKEN=your-line-channel-access-token
 ```
@@ -140,6 +162,20 @@ LINE_CHANNEL_ACCESS_TOKEN=your-line-channel-access-token
 # macOS/Linux
 openssl rand -hex 32
 ```
+
+```powershell
+# Windows PowerShell
+[Convert]::ToHexString((1..32 | ForEach-Object { Get-Random -Minimum 0 -Maximum 256 }))
+```
+
+**或使用 Python（跨平台，推薦）：**
+
+```bash
+python -c "import secrets; print(secrets.token_hex(32))"
+```
+
+**或使用線上工具：**
+可使用 [Random.org](https://www.random.org/strings/) 或其他密碼生成器生成至少 64 字元的隨機字串。
 
 ### 4. 啟動系統
 
