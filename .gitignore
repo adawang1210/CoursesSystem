@@ -1,0 +1,112 @@
+# OS / Editor
+.DS_Store
+*.swp
+*.swo
+.idea/
+.vscode/
+
+# Node / Next.js
+node_modules/
+.next/
+.next.cache/
+out/
+coverage/
+
+# Python / Virtualenv
+backend/venv/
+**/__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.pytest_cache/
+.eggs/
+build/
+dist/
+
+# Env / Secrets
+.env
+.env.*
+frontend/.env
+backend/.env
+
+# Logs / Temp
+*.log
+logs/
+ngrok.log
+
+# Local data / uploads
+uploads/
+*.sqlite
+
+# Cache
+.cache/
+.npm/
+.yarn/
+
+# Misc
+*.local
+*.tmp
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+ENV/
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Environment
+.env
+.env.local
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+logs/
+
+# Frontend
+node_modules/
+frontend/dist/
+frontend/build/
+.cache/
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Database
+*.db
+*.sqlite3
+
+# Temporary files
+*.tmp
+.temp/
+
