@@ -194,7 +194,7 @@ python -c "import secrets; print(secrets.token_hex(32))"
 ```bash
 # 終端機 1 - 後端
 cd backend
-python3 -m venv venv
+python3 -m venv venv # Windows: python -m venv venv
 source venv/bin/activate  # Windows: venv\Scripts\activate
 pip install -r requirements.txt
 python -m app.main
