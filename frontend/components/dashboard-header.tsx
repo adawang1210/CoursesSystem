@@ -1,7 +1,7 @@
 "use client"
 
 import { Button } from "@/components/ui/button"
-import { LogOut, Settings, Moon, Sun } from "lucide-react"
+import { LogOut, Moon, Sun } from "lucide-react"
 import { useRouter } from "next/navigation"
 import { useTheme } from "@/contexts/theme-context"
 
@@ -18,9 +18,6 @@ export function DashboardHeader({ user, onLogout }: DashboardHeaderProps) {
     <header className="border-b border-border bg-card">
       <div className="px-8 py-4 flex items-center justify-between">
         <div className="flex items-center gap-2">
-          <div className="w-8 h-8 rounded-lg bg-primary flex items-center justify-center">
-            <span className="text-primary-foreground font-bold text-sm">TP</span>
-          </div>
           <h1 className="text-xl font-bold text-foreground">AI 教學平台</h1>
         </div>
 
@@ -36,9 +33,6 @@ export function DashboardHeader({ user, onLogout }: DashboardHeaderProps) {
             title={theme === "light" ? "切換暗色模式" : "切換亮色模式"}
           >
             {theme === "light" ? <Moon className="w-4 h-4" /> : <Sun className="w-4 h-4" />}
-          </Button>
-          <Button variant="ghost" size="icon" onClick={() => router.push("/dashboard/settings")}>
-            <Settings className="w-4 h-4" />
           </Button>
           <Button
             variant="ghost"

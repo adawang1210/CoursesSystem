@@ -95,6 +95,7 @@ export default function LineIntegrationPage() {
   const [stats, setStats] = useState<any>(null);
   const [messageStats, setMessageStats] = useState<DailyMessageStat[]>([]);
   const [dailyStats, setDailyStats] = useState<DailyActivityStat[]>([]);
+  const [userLabels, setUserLabels] = useState<Record<string, string>>({});
   const { toast } = useToast();
 
   // 載入 LINE Bot 配置和狀態
@@ -206,9 +207,21 @@ export default function LineIntegrationPage() {
     }
   };
 
+  const createUserLabel = (index: number) => `學生${index + 1}`;
+
+  const getLabelForUser = (userId?: string, fallback?: string) => {
+    if (!userId) return fallback || "學生";
+    return userLabels[userId] || fallback || "學生";
+  };
+
   const loadUsers = async () => {
     try {
       const data = await getLineUsers();
+      const labelMap: Record<string, string> = {};
+      data.users.forEach((user, index) => {
+        labelMap[user.user_id] = createUserLabel(index);
+      });
+      setUserLabels(labelMap);
       setUsers(data.users);
     } catch (error) {
       console.error("載入使用者列表失敗:", error);
@@ -221,7 +234,10 @@ export default function LineIntegrationPage() {
       // 轉換 API 訊息格式為前端格式
       const convertedMessages: LineMessage[] = data.messages.map((msg) => ({
         id: msg._id,
-        sender: msg.direction === "received" ? msg.pseudonym : "系統",
+        sender:
+          msg.direction === "received"
+            ? getLabelForUser(msg.user_id, msg.pseudonym)
+            : "系統",
         content: msg.content,
         timestamp: new Date(msg.created_at).toLocaleString("zh-TW", {
           year: "numeric",
@@ -677,7 +693,7 @@ export default function LineIntegrationPage() {
                         >
                           <div className="flex items-start justify-between mb-1">
                             <p className="font-medium text-sm truncate">
-                              {user.pseudonym}
+                              {getLabelForUser(user.user_id, user.pseudonym)}
                             </p>
                             <span className="text-xs opacity-70 ml-2 whitespace-nowrap">
                               {user.message_count}
@@ -716,7 +732,10 @@ export default function LineIntegrationPage() {
                   <div className="mb-4 pb-3 border-b">
                     <h3 className="font-semibold">
                       {selectedUser
-                        ? `與 ${selectedUser.pseudonym} 的對話`
+                        ? `與 ${getLabelForUser(
+                            selectedUser.user_id,
+                            selectedUser.pseudonym
+                          )} 的對話`
                         : "所有訊息"}
                     </h3>
                     {selectedUser && (
@@ -775,7 +794,10 @@ export default function LineIntegrationPage() {
                     <Input
                       placeholder={
                         selectedUser
-                          ? `發送訊息給 ${selectedUser.pseudonym}...`
+                          ? `發送訊息給 ${getLabelForUser(
+                              selectedUser.user_id,
+                              selectedUser.pseudonym
+                            )}...`
                           : "請先選擇使用者..."
                       }
                       value={newMessage}
