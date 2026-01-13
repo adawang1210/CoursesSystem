@@ -31,8 +31,11 @@ class Settings(BaseSettings):
     CORS_ORIGINS: str = "http://localhost:3000,http://localhost:5173"
     
     # AI/NLP 服務配置
-    AI_SERVICE_URL: str = "http://localhost:8001"
-    AI_SERVICE_API_KEY: str = ""
+    AI_BASE_URL: str = "https://api.openai.com/v1" 
+    AI_API_KEY: str = ""
+    AI_MODEL: str = "gpt-4o-mini"
+    # AI_SERVICE_URL: str = "http://localhost:8001"
+    # AI_SERVICE_API_KEY: str = ""
     
     class Config:
         env_file = ".env"

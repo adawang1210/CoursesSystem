@@ -4,6 +4,7 @@ LINE Bot 整合 API 路由
 """
 from fastapi import APIRouter, Request, HTTPException, Header
 from typing import Optional
+from ..services.ai_service import ai_service
 from linebot.v3 import WebhookHandler
 from linebot.v3.exceptions import InvalidSignatureError
 from linebot.v3.messaging import (
@@ -250,9 +251,11 @@ def handle_text_message(event: MessageEvent):
             "created_at": datetime.utcnow()
         }
         messages_collection.insert_one(received_message)
+
+        system_instruction = "你是一個資管系的教學助理，請協助回答關於程式設計的問題。"
         
         # 發送回覆
-        reply_text = f"您的訊息已收到：{message_text}\n\n此功能正在開發中..."
+        reply_text = ai_service.get_reply(message_text, system_instruction)
         with ApiClient(configuration) as api_client:
             line_bot_api = MessagingApi(api_client)
             line_bot_api.reply_message_with_http_info(
