@@ -129,6 +129,10 @@ class QuestionBase(BaseModel):
     difficulty_score: Optional[float] = Field(None, description="難度分數 (0-1)")
     difficulty_level: Optional[DifficultyLevel] = Field(None, description="難度等級")
     keywords: List[str] = Field(default_factory=list, description="關鍵字列表")
+
+    ai_response_draft: Optional[str] = Field(None, description="AI 生成的回覆草稿")
+    ai_summary: Optional[str] = Field(None, description="AI 對問題的摘要或重述")
+    sentiment_score: Optional[float] = Field(None, description="情緒分數 (-1 to 1)")
     
     # 合併相關
     merged_to_qa_id: Optional[str] = Field(None, description="合併至的 Q&A ID")
@@ -292,6 +296,9 @@ class AIAnalysisResult(BaseModel):
     cluster_id: str = Field(..., description="聚類ID")
     difficulty_score: float = Field(..., description="難度分數")
     keywords: List[str] = Field(default_factory=list, description="關鍵字")
+    response_draft: Optional[str] = Field(None, description="AI 生成的回覆草稿")
+    summary: Optional[str] = Field(None, description="問題摘要")
+    suggested_tags: List[str] = Field(default_factory=list, description="建議標籤")
 
 
 # ==================== 統計報表相關模型 ====================
@@ -376,6 +383,30 @@ class LineMessage(LineMessageBase):
     """LINE 訊息完整模型"""
     id: str = Field(alias="_id")
     created_at: datetime = Field(default_factory=datetime.utcnow)
+    
+    class Config:
+        populate_by_name = True
+
+class ClusterBase(BaseModel):
+    """AI 聚類主題模型 (用來描述一群相似的問題)"""
+    course_id: str = Field(..., description="所屬課程ID")
+    topic_label: str = Field(..., description="AI 生成的主題標籤 (例如: '迴圈語法錯誤')")
+    summary: Optional[str] = Field(None, description="該主題的綜合摘要")
+    keywords: List[str] = Field(default_factory=list, description="該聚類的代表性關鍵字")
+    
+    # 統計資訊
+    question_count: int = Field(default=0, description="包含的問題數量")
+    avg_difficulty: float = Field(default=0.0, description="平均難度")
+
+class ClusterCreate(ClusterBase):
+    """建立聚類"""
+    pass
+
+class Cluster(ClusterBase):
+    """聚類完整模型"""
+    id: str = Field(alias="_id")
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+    updated_at: datetime = Field(default_factory=datetime.utcnow)
     
     class Config:
         populate_by_name = True

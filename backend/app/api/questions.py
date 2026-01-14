@@ -1,7 +1,7 @@
 """
 提問管理 API 路由
 """
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, BackgroundTasks
 from typing import List, Optional
 from ..models.schemas import (
     Question, QuestionCreate, QuestionStatus, QuestionStatusUpdate,
@@ -14,17 +14,17 @@ router = APIRouter(prefix="/questions", tags=["questions"])
 
 
 @router.post("/", response_model=dict, summary="建立新提問 (Line Bot 調用)")
-async def create_question(question_data: QuestionCreate):
+async def create_question(question_data: QuestionCreate, background_tasks: BackgroundTasks):
     """
     建立新提問
     
     **重要**: 此 API 會自動進行去識別化處理，line_user_id 不會被儲存
     """
     try:
-        question = await question_service.create_question(question_data)
+        question = await question_service.create_question(question_data, background_tasks)
         return {
             "success": True,
-            "message": "提問建立成功",
+            "message": "提問建立成功 (AI 分析中...)",
             "data": question
         }
     except ValueError as e:

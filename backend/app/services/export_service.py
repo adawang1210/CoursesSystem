@@ -18,20 +18,14 @@ class ExportService:
         self,
         course_id: str,
         class_id: Optional[str] = None,
+        # =========== 🔥 新增參數 🔥 ===========
+        cluster_id: Optional[str] = None,
+        # ====================================
         start_date: Optional[datetime] = None,
         end_date: Optional[datetime] = None
     ) -> str:
         """
-        匯出提問資料為 CSV 格式
-        
-        Args:
-            course_id: 課程ID
-            class_id: 班級ID (可選)
-            start_date: 開始日期 (可選)
-            end_date: 結束日期 (可選)
-        
-        Returns:
-            CSV 格式的字串
+        匯出提問資料為 CSV 格式 (包含 AI 分析欄位)
         """
         database = db.get_db()
         collection = database["questions"]
@@ -41,6 +35,11 @@ class ExportService:
         
         if class_id:
             query["class_id"] = class_id
+
+        # =========== 🔥 新增篩選邏輯 🔥 ===========
+        if cluster_id:
+            query["cluster_id"] = cluster_id
+        # ========================================
         
         if start_date or end_date:
             query["created_at"] = {}
@@ -57,7 +56,7 @@ class ExportService:
         output = io.StringIO()
         writer = csv.writer(output)
         
-        # 寫入標題列
+        # 寫入標題列 (新增 AI 相關欄位)
         writer.writerow([
             "提問ID",
             "去識別化代號",
@@ -67,6 +66,11 @@ class ExportService:
             "難度分數",
             "難度等級",
             "關鍵字",
+            # =========== 🔥 新增標題 🔥 ===========
+            "AI回答草稿",
+            "AI摘要",
+            "情緒分數",
+            # ====================================
             "是否已合併",
             "合併至Q&A ID",
             "建立時間",
@@ -84,6 +88,11 @@ class ExportService:
                 q.get("difficulty_score", ""),
                 q.get("difficulty_level", ""),
                 ", ".join(q.get("keywords", [])),
+                # =========== 🔥 新增資料欄位 🔥 ===========
+                q.get("ai_response_draft", ""),
+                q.get("ai_summary", ""),
+                q.get("sentiment_score", ""),
+                # ========================================
                 "是" if q.get("is_merged", False) else "否",
                 q.get("merged_to_qa_id", ""),
                 format_datetime(q.get("created_at")),
@@ -94,7 +103,84 @@ class ExportService:
         output.close()
         
         return csv_content
-    
+
+    # =========== 🔥 新增方法：匯出聚類報表 🔥 ===========
+    async def export_clusters_to_csv(
+        self,
+        course_id: str
+    ) -> str:
+        """
+        匯出 AI 聚類主題分析報表
+        """
+        database = db.get_db()
+        collection = database["questions"]
+        
+        # 使用聚合管道統計聚類資訊
+        pipeline = [
+            {
+                "$match": {
+                    "course_id": course_id,
+                    "cluster_id": {"$ne": None}
+                }
+            },
+            {
+                "$group": {
+                    "_id": "$cluster_id",
+                    "count": {"$sum": 1},
+                    "avg_difficulty": {"$avg": "$difficulty_score"},
+                    "keywords": {"$push": "$keywords"}
+                }
+            },
+            {
+                "$sort": {"count": -1}
+            }
+        ]
+        
+        results = await collection.aggregate(pipeline).to_list(length=None)
+        
+        # 建立 CSV
+        output = io.StringIO()
+        writer = csv.writer(output)
+        
+        # 寫入標題
+        writer.writerow([
+            "聚類ID (主題)",
+            "提問數量",
+            "平均難度",
+            "熱門關鍵字 (Top 5)"
+        ])
+        
+        # 處理資料
+        for result in results:
+            # 統計該聚類下的熱門關鍵字
+            all_keywords = []
+            for kw_list in result.get("keywords", []):
+                all_keywords.extend(kw_list)
+            
+            keyword_freq = {}
+            for kw in all_keywords:
+                keyword_freq[kw] = keyword_freq.get(kw, 0) + 1
+            
+            top_keywords = sorted(
+                keyword_freq.items(),
+                key=lambda x: x[1],
+                reverse=True
+            )[:5]
+            top_keywords_str = ", ".join([k[0] for k in top_keywords])
+            
+            writer.writerow([
+                result["_id"],
+                result["count"],
+                f"{result.get('avg_difficulty', 0):.2f}",
+                top_keywords_str
+            ])
+            
+        csv_content = output.getvalue()
+        output.close()
+        
+        return csv_content
+    # =================================================
+
     async def export_qas_to_csv(
         self,
         course_id: str,
@@ -102,13 +188,6 @@ class ExportService:
     ) -> str:
         """
         匯出 Q&A 資料為 CSV 格式
-        
-        Args:
-            course_id: 課程ID
-            class_id: 班級ID (可選)
-        
-        Returns:
-            CSV 格式的字串
         """
         database = db.get_db()
         collection = database["qas"]
@@ -171,18 +250,6 @@ class ExportService:
     ) -> str:
         """
         匯出統計資料為 CSV 格式
-        
-        包含：
-        - 各狀態的提問數量統計
-        - 各聚類的提問數量統計
-        - 難度分布統計
-        
-        Args:
-            course_id: 課程ID
-            class_id: 班級ID (可選)
-        
-        Returns:
-            CSV 格式的字串
         """
         database = db.get_db()
         collection = database["questions"]
@@ -266,4 +333,3 @@ class ExportService:
 
 # 全域服務實例
 export_service = ExportService()
-

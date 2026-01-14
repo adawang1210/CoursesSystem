@@ -2,10 +2,11 @@
 AI 層整合 API
 提供 AI/NLP 服務調用的專用接口
 """
-from fastapi import APIRouter, HTTPException, Query
-from typing import List
-from ..models.schemas import AIAnalysisRequest, AIAnalysisResult
+from fastapi import APIRouter, HTTPException, Query, BackgroundTasks
+from typing import List, Optional
+from ..models.schemas import AIAnalysisRequest, AIAnalysisResult, Cluster
 from ..services.question_service import question_service
+from ..services.ai_service import ai_service
 
 
 router = APIRouter(prefix="/ai", tags=["ai-integration"])
@@ -108,6 +109,103 @@ async def single_update_ai_analysis(
         "data": question
     }
 
+@router.post("/questions/{question_id}/draft", summary="生成/重寫問題的回覆草稿")
+async def generate_response_draft(
+    question_id: str,
+    background_tasks: BackgroundTasks
+):
+    """
+    觸發 AI 為特定問題生成回覆草稿
+    """
+    # 1. 取得問題資料
+    question = await question_service.get_question(question_id)
+    if not question:
+        raise HTTPException(status_code=404, detail="找不到此提問")
+
+    # 2. 定義背景任務函數
+    async def _generate_and_save_draft(qid: str, text: str):
+        try:
+            # 呼叫 AI 生成草稿
+            draft = await ai_service.generate_response_draft(text)
+            
+            # 呼叫 AI 生成摘要 (順便做)
+            analysis = await ai_service.analyze_question(text)
+            summary = analysis.get("summary", "")
+            
+            # 構造更新物件 (利用現有的 update_ai_analysis 介面)
+            # 注意：這裡假設您已經在 schemas.py 的 AIAnalysisResult 加入了 response_draft 欄位
+            result = AIAnalysisResult(
+                question_id=qid,
+                difficulty_score=question.get("difficulty_score", 0.5), # 保持原值
+                keywords=question.get("keywords", []), # 保持原值
+                cluster_id=question.get("cluster_id"), # 保持原值
+                response_draft=draft,    # <--- 更新重點
+                summary=summary          # <--- 更新重點
+            )
+            
+            await question_service.update_ai_analysis(qid, result)
+            print(f"✅ 已為問題 {qid} 生成草稿")
+            
+        except Exception as e:
+            print(f"❌ 草稿生成失敗: {str(e)}")
+
+    # 3. 加入背景任務 (讓 API 立刻回應，不用等 AI)
+    background_tasks.add_task(
+        _generate_and_save_draft, 
+        question_id, 
+        question["question_text"]
+    )
+
+    return {
+        "success": True,
+        "message": "已開始生成草稿，請稍後重新整理頁面查看"
+    }
+
+
+@router.post("/clusters/generate", summary="執行課程主題聚類分析")
+async def generate_course_clusters(
+    course_id: str,
+    background_tasks: BackgroundTasks
+):
+    """
+    分析該課程所有「未歸類」的問題，嘗試進行自動分群與命名
+    """
+    # 定義背景任務
+    async def _run_clustering_task(cid: str):
+        print(f"🤖 開始執行課程 {cid} 的聚類分析...")
+        try:
+            # 1. 撈出該課程所有還沒分群的問題 (Pending + Cluster=None)
+            questions = await question_service.get_pending_questions_for_ai(cid, limit=50)
+            
+            if not questions:
+                print("沒有需要分群的問題")
+                return
+
+            # 簡化版邏輯：直接把前 10 個問題丟給 AI 請它歸納一個主題
+            # (實務上這裡可以用 K-Means 或更複雜的邏輯，但先從簡單的開始)
+            q_texts = [q['question_text'] for q in questions]
+            
+            # 呼叫 AI 歸納主題
+            cluster_result = await ai_service.generate_cluster_label(q_texts)
+            
+            topic_label = cluster_result.get("topic_label", "未命名主題")
+            summary = cluster_result.get("summary", "")
+            
+            print(f"🔍 AI 歸納出的主題: {topic_label}")
+            
+            # TODO: 這裡應該要呼叫 service 把這些問題的 cluster_id 更新
+            # 並且建立一個新的 Cluster Document
+            # (這部分邏輯較複雜，建議先實作到這裡確認 AI 能跑)
+            
+        except Exception as e:
+            print(f"❌ 聚類分析失敗: {str(e)}")
+
+    background_tasks.add_task(_run_clustering_task, course_id)
+
+    return {
+        "success": True,
+        "message": "聚類分析任務已啟動"
+    }
 
 @router.get("/clusters/{course_id}", response_model=dict, summary="取得課程的所有聚類")
 async def get_clusters_summary(course_id: str):

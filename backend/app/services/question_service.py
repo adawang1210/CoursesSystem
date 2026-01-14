@@ -5,6 +5,7 @@
 from typing import List, Optional, Dict, Any
 from datetime import datetime
 from bson import ObjectId
+from fastapi import BackgroundTasks
 from ..database import db
 from ..models.schemas import (
     Question, QuestionCreate, QuestionStatus,
@@ -12,6 +13,7 @@ from ..models.schemas import (
 )
 from ..utils.security import generate_pseudonym
 from .course_service import course_service
+from .ai_service import ai_service
 
 
 class QuestionService:
@@ -20,7 +22,7 @@ class QuestionService:
     def __init__(self):
         self.collection_name = "questions"
     
-    async def create_question(self, question_data: QuestionCreate) -> Dict[str, Any]:
+    async def create_question(self, question_data: QuestionCreate, background_tasks: Optional[BackgroundTasks] = None) -> Dict[str, Any]:
         """
         建立新提問 (從 Line Bot 接收)
         
@@ -69,10 +71,48 @@ class QuestionService:
         }
         
         result = await collection.insert_one(question_doc)
-        question_doc["_id"] = str(result.inserted_id)
-        
+        new_question_id = str(result.inserted_id)
+        question_doc["_id"] = new_question_id
+
+        # 啟動背景任務進行 AI 分析
+        if background_tasks:
+            background_tasks.add_task(self.process_new_question_ai, new_question_id, question_data.question_text)
+
         return question_doc
     
+    async def process_new_question_ai(self, question_id: str, question_text: str):
+        """
+        [背景任務] 執行 AI 分析並更新資料庫
+        """
+        try:
+            print(f"🤖 開始 AI 分析提問: {question_id}")
+            
+            # 1. 執行深度分析 (關鍵字、難度、摘要)
+            analysis_data = await ai_service.analyze_question(question_text)
+            
+            # 2. 生成回答草稿
+            draft = await ai_service.generate_response_draft(question_text)
+            
+            # 3. 組合結果 (符合 AIAnalysisResult 格式)
+            # 注意：這裡直接構造字典或物件傳給 update_ai_analysis
+            # 為了方便，我們直接操作 DB 或構造 Pydantic 物件
+            
+            analysis_result = AIAnalysisResult(
+                question_id=question_id,
+                difficulty_score=analysis_data.get("difficulty_score", 0.5),
+                keywords=analysis_data.get("keywords", []),
+                cluster_id=None, # 暫時不分群
+                response_draft=draft,
+                summary=analysis_data.get("summary", ""),
+                sentiment_score=0.0 # 暫時預設
+            )
+            
+            await self.update_ai_analysis(question_id, analysis_result)
+            print(f"✅ AI 分析完成: {question_id}")
+            
+        except Exception as e:
+            print(f"❌ AI 背景任務失敗: {str(e)}")
+
     async def get_question(self, question_id: str) -> Optional[Dict[str, Any]]:
         """取得單一提問"""
         database = db.get_db()
@@ -227,6 +267,9 @@ class QuestionService:
             "difficulty_score": analysis_result.difficulty_score,
             "difficulty_level": difficulty_level,
             "keywords": analysis_result.keywords,
+            "ai_response_draft": getattr(analysis_result, "response_draft", None),
+            "ai_summary": getattr(analysis_result, "summary", None),
+            "sentiment_score": getattr(analysis_result, "sentiment_score", None),
             "updated_at": datetime.utcnow()
         }
         
