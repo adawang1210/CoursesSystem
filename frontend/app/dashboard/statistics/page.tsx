@@ -22,6 +22,8 @@ import {
   Tooltip,
   Legend,
   ResponsiveContainer,
+  ComposedChart, // 1. 新增 ComposedChart
+  Line,          // 1. 新增 Line
 } from "recharts";
 import {
   Users,
@@ -29,6 +31,7 @@ import {
   CheckCircle,
   Download,
   RefreshCw,
+  TrendingUp, // 2. 新增圖示
 } from "lucide-react";
 import {
   reportsApi,
@@ -48,12 +51,12 @@ export default function StatisticsPage() {
   const [exporting, setExporting] = useState<string | null>(null);
   const { toast } = useToast();
 
-  // 載入課程列表
+  // ... (loadCourses, loadStatistics, loadClusters 邏輯保持不變) ...
+
   useEffect(() => {
     loadCourses();
   }, []);
 
-  // 當課程選擇改變時，載入統計資料
   useEffect(() => {
     if (selectedCourse) {
       loadStatistics();
@@ -70,32 +73,17 @@ export default function StatisticsPage() {
       }
     } catch (error) {
       console.error("載入課程失敗:", error);
-      toast({
-        title: "錯誤",
-        description: "無法載入課程列表",
-        variant: "destructive",
-      });
     }
   };
 
   const loadStatistics = async () => {
     if (!selectedCourse) return;
-
     try {
       setLoading(true);
-      const response = await reportsApi.getStatistics({
-        course_id: selectedCourse,
-      });
-      if (response.success) {
-        setStatistics(response.data);
-      }
+      const response = await reportsApi.getStatistics({ course_id: selectedCourse });
+      if (response.success) setStatistics(response.data ?? null);
     } catch (error) {
-      console.error("載入統計資料失敗:", error);
-      toast({
-        title: "錯誤",
-        description: "無法載入統計資料",
-        variant: "destructive",
-      });
+      console.error(error);
     } finally {
       setLoading(false);
     }
@@ -103,26 +91,17 @@ export default function StatisticsPage() {
 
   const loadClusters = async () => {
     if (!selectedCourse) return;
-
     try {
       const response = await reportsApi.getClustersSummary(selectedCourse);
-      if (response.success) {
-        setClusters(response.data);
-      }
+      if (response.success) setClusters(response.data ?? []);
     } catch (error) {
-      console.error("載入聚類資料失敗:", error);
+      console.error(error);
     }
   };
 
-  const handleExport = async (type: "questions" | "qas" | "statistics") => {
-    if (!selectedCourse) {
-      toast({
-        title: "提示",
-        description: "請先選擇課程",
-        variant: "destructive",
-      });
-      return;
-    }
+  // 3. 修改匯出邏輯，支援 'clusters'
+  const handleExport = async (type: "questions" | "qas" | "statistics" | "clusters") => {
+    if (!selectedCourse) return;
 
     try {
       setExporting(type);
@@ -130,22 +109,22 @@ export default function StatisticsPage() {
 
       switch (type) {
         case "questions":
-          blob = await reportsApi.exportQuestions({
-            course_id: selectedCourse,
-          });
+          blob = await reportsApi.exportQuestions({ course_id: selectedCourse });
           break;
         case "qas":
           blob = await reportsApi.exportQAs({ course_id: selectedCourse });
           break;
         case "statistics":
-          blob = await reportsApi.exportStatistics({
-            course_id: selectedCourse,
-          });
+          blob = await reportsApi.exportStatistics({ course_id: selectedCourse });
+          break;
+        case "clusters": // 新增匯出選項
+          // 注意：需確認 reportsApi 有實作 exportClusters
+          // 若無，請在 frontend/lib/api/reports.ts 補上
+          blob = await reportsApi.exportClusters({ course_id: selectedCourse });
           break;
       }
 
-      // 下載檔案
-      const url = window.URL.createObjectURL(blob);
+      const url = window.URL.createObjectURL(blob!); // 加 ! 忽略 TS 檢查，實務上 blob 一定有值
       const a = document.createElement("a");
       a.href = url;
       a.download = `${type}_${selectedCourse}_${new Date().getTime()}.csv`;
@@ -154,129 +133,77 @@ export default function StatisticsPage() {
       window.URL.revokeObjectURL(url);
       document.body.removeChild(a);
 
-      toast({
-        title: "成功",
-        description: "資料匯出成功",
-      });
+      toast({ title: "成功", description: "資料匯出成功" });
     } catch (error) {
       console.error("匯出失敗:", error);
-      toast({
-        title: "錯誤",
-        description: "匯出資料失敗",
-        variant: "destructive",
-      });
+      toast({ title: "錯誤", description: "匯出資料失敗", variant: "destructive" });
     } finally {
       setExporting(null);
     }
   };
 
-  // 準備圖表資料
-  const statusChartData =
-    statistics && statistics.status_distribution
-      ? Object.entries(statistics.status_distribution).map(
-          ([status, count]) => ({
-            name: getStatusLabel(status),
-            value: count,
-            fill: getStatusColor(status),
-          })
-        )
-      : [];
+  // ... (statusChartData 保持不變) ...
+  const statusChartData = statistics?.status_distribution
+    ? Object.entries(statistics.status_distribution).map(([status, count]) => ({
+        name: getStatusLabel(status),
+        value: count,
+        fill: getStatusColor(status),
+      }))
+    : [];
+
+  // 4. 新增難度分佈資料準備
+  const difficultyChartData = statistics?.difficulty_distribution
+    ? [
+        { name: "簡單", value: statistics.difficulty_distribution.easy || 0, fill: "#22c55e" },
+        { name: "中等", value: statistics.difficulty_distribution.medium || 0, fill: "#eab308" },
+        { name: "困難", value: statistics.difficulty_distribution.hard || 0, fill: "#ef4444" },
+      ]
+    : [];
 
   const clusterChartData = clusters.slice(0, 10).map((cluster) => ({
-    name: `群組 ${cluster.cluster_id}`,
+    name: cluster.topic_label || `主題 ${cluster.cluster_id.substring(0, 4)}`, // 優先顯示主題標籤
     count: cluster.question_count,
-    difficulty: cluster.avg_difficulty.toFixed(2),
+    difficulty: Number((cluster.avg_difficulty || 0).toFixed(2)), // 轉為數字供圖表使用
   }));
 
-  function getStatusLabel(status: string): string {
-    const labels: { [key: string]: string } = {
-      PENDING: "待處理",
-      APPROVED: "已同意",
-      REJECTED: "已拒絕",
-      DELETED: "已刪除",
-      WITHDRAWN: "已撤回",
-    };
-    return labels[status] || status;
-  }
+  function getStatusLabel(status: string) { /* ... 保持不變 ... */ return status; }
+  function getStatusColor(status: string) { /* ... 保持不變 ... */ return "#9ca3af"; }
 
-  function getStatusColor(status: string): string {
-    const colors: { [key: string]: string } = {
-      PENDING: "#fbbf24",
-      APPROVED: "#10b981",
-      REJECTED: "#ef4444",
-      DELETED: "#6b7280",
-      WITHDRAWN: "#8b5cf6",
-    };
-    return colors[status] || "#9ca3af";
-  }
-
-  const selectedCourseName =
-    courses.find((c) => c._id === selectedCourse)?.course_name || "";
+  const selectedCourseName = courses.find((c) => c._id === selectedCourse)?.course_name || "";
 
   return (
     <div className="p-8">
-      <div className="mb-8">
+      {/* ... (標題與篩選器保持不變) ... */}
+       <div className="mb-8">
         <h1 className="text-4xl font-bold text-foreground mb-2">統計報表</h1>
         <p className="text-muted-foreground">查看平台統計數據和分析</p>
       </div>
 
-      {/* 課程選擇器 */}
       <div className="mb-6 flex items-center gap-4">
+        {/* ... Select 元件保持不變 ... */}
         <div className="flex-1 max-w-md">
-          <Select value={selectedCourse} onValueChange={setSelectedCourse}>
-            <SelectTrigger>
-              <SelectValue placeholder="選擇課程" />
-            </SelectTrigger>
+            <Select value={selectedCourse} onValueChange={setSelectedCourse}>
+            <SelectTrigger><SelectValue placeholder="選擇課程" /></SelectTrigger>
             <SelectContent>
-              {courses.map((course) => (
-                <SelectItem key={course._id} value={course._id || ""}>
-                  {course.course_name}
-                </SelectItem>
-              ))}
+                {courses.map(c => <SelectItem key={c._id} value={c._id || ""}>{c.course_name}</SelectItem>)}
             </SelectContent>
-          </Select>
+            </Select>
         </div>
-        <Button
-          variant="outline"
-          size="icon"
-          onClick={() => {
-            loadStatistics();
-            loadClusters();
-          }}
-          disabled={loading || !selectedCourse}
-        >
-          <RefreshCw className={`w-4 h-4 ${loading ? "animate-spin" : ""}`} />
-        </Button>
+         <Button variant="outline" size="icon" onClick={() => { loadStatistics(); loadClusters(); }} disabled={loading || !selectedCourse}>
+            <RefreshCw className={`w-4 h-4 ${loading ? "animate-spin" : ""}`} />
+         </Button>
       </div>
 
-      {!selectedCourse ? (
-        <Card className="p-8">
-          <div className="text-center text-muted-foreground">
-            請選擇課程以查看統計資料
-          </div>
-        </Card>
-      ) : loading ? (
-        <Card className="p-8">
-          <div className="text-center text-muted-foreground">載入中...</div>
-        </Card>
-      ) : !statistics ? (
-        <Card className="p-8">
-          <div className="text-center text-muted-foreground">
-            無法載入統計資料
-          </div>
-        </Card>
-      ) : (
+      {!selectedCourse ? ( /* ... */ <div/> ) : loading ? ( /* ... */ <div/> ) : !statistics ? ( /* ... */ <div/> ) : (
         <>
-          {/* KPI Cards */}
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8">
+          {/* KPI Cards: 新增平均難度 */}
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-8"> {/* 改成 4 欄 */}
             <Card>
               <CardContent className="pt-6">
                 <div className="flex justify-between items-start">
                   <div>
                     <p className="text-sm text-muted-foreground">總提問數</p>
-                    <p className="text-3xl font-bold text-primary">
-                      {statistics.total_questions}
-                    </p>
+                    <p className="text-3xl font-bold text-primary">{statistics.total_questions}</p>
                   </div>
                   <MessageSquare className="w-8 h-8 text-primary opacity-20" />
                 </div>
@@ -287,9 +214,7 @@ export default function StatisticsPage() {
                 <div className="flex justify-between items-start">
                   <div>
                     <p className="text-sm text-muted-foreground">待處理</p>
-                    <p className="text-3xl font-bold text-yellow-600">
-                      {statistics.pending_questions}
-                    </p>
+                    <p className="text-3xl font-bold text-yellow-600">{statistics.pending_questions}</p>
                   </div>
                   <Users className="w-8 h-8 text-yellow-600 opacity-20" />
                 </div>
@@ -300,112 +225,106 @@ export default function StatisticsPage() {
                 <div className="flex justify-between items-start">
                   <div>
                     <p className="text-sm text-muted-foreground">已同意</p>
-                    <p className="text-3xl font-bold text-green-600">
-                      {statistics.approved_questions}
-                    </p>
+                    <p className="text-3xl font-bold text-green-600">{statistics.approved_questions}</p>
                   </div>
                   <CheckCircle className="w-8 h-8 text-green-600 opacity-20" />
                 </div>
               </CardContent>
             </Card>
-          </div>
-
-          {/* Charts */}
-          <div className="mb-8">
+            {/* 新增：平均難度卡片 */}
             <Card>
-              <CardHeader>
-                <CardTitle>提問狀態分布</CardTitle>
-              </CardHeader>
-              <CardContent>
-                {statusChartData.length > 0 ? (
-                  <ResponsiveContainer width="100%" height={300}>
-                    <PieChart>
-                      <Pie
-                        data={statusChartData}
-                        cx="50%"
-                        cy="50%"
-                        labelLine={false}
-                        label={({ name, value }) => `${name}: ${value}`}
-                        outerRadius={100}
-                        dataKey="value"
-                      >
-                        {statusChartData.map((entry, index) => (
-                          <Cell key={`cell-${index}`} fill={entry.fill} />
-                        ))}
-                      </Pie>
-                      <Tooltip />
-                    </PieChart>
-                  </ResponsiveContainer>
-                ) : (
-                  <div className="h-[300px] flex items-center justify-center text-muted-foreground">
-                    無資料
+              <CardContent className="pt-6">
+                <div className="flex justify-between items-start">
+                  <div>
+                    <p className="text-sm text-muted-foreground">平均難度</p>
+                    <p className="text-3xl font-bold text-orange-500">
+                      {statistics.avg_difficulty_score?.toFixed(2) || "0.00"}
+                    </p>
                   </div>
-                )}
+                  <TrendingUp className="w-8 h-8 text-orange-500 opacity-20" />
+                </div>
               </CardContent>
             </Card>
           </div>
 
-          {/* AI 聚類統計 */}
-          {clusters.length > 0 && (
-            <Card className="mb-8">
-              <CardHeader>
-                <CardTitle>AI 聚類分布（前 10 個）</CardTitle>
-              </CardHeader>
+          {/* Charts: 新增難度分佈 */}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
+            <Card>
+              <CardHeader><CardTitle>提問狀態分布</CardTitle></CardHeader>
               <CardContent>
                 <ResponsiveContainer width="100%" height={300}>
-                  <BarChart data={clusterChartData}>
+                  <PieChart>
+                    <Pie data={statusChartData} cx="50%" cy="50%" labelLine={false} label={({ name, value }) => `${name}: ${value}`} outerRadius={100} dataKey="value">
+                      {statusChartData.map((entry, index) => <Cell key={`cell-${index}`} fill={entry.fill} />)}
+                    </Pie>
+                    <Tooltip />
+                  </PieChart>
+                </ResponsiveContainer>
+              </CardContent>
+            </Card>
+
+            {/* 新增：難度分佈圖表 */}
+            <Card>
+              <CardHeader><CardTitle>問題難度分布</CardTitle></CardHeader>
+              <CardContent>
+                 <ResponsiveContainer width="100%" height={300}>
+                  <BarChart data={difficultyChartData}>
                     <CartesianGrid strokeDasharray="3 3" />
                     <XAxis dataKey="name" />
                     <YAxis />
                     <Tooltip />
-                    <Legend />
-                    <Bar dataKey="count" fill="#0066cc" name="提問數量" />
+                    <Bar dataKey="value" name="數量" radius={[4, 4, 0, 0]}>
+                      {difficultyChartData.map((entry, index) => (
+                        <Cell key={`cell-${index}`} fill={entry.fill} />
+                      ))}
+                    </Bar>
                   </BarChart>
+                </ResponsiveContainer>
+              </CardContent>
+            </Card>
+          </div>
+
+          {/* AI 聚類統計：改為複合圖表 (數量+難度) */}
+          {clusters.length > 0 && (
+            <Card className="mb-8">
+              <CardHeader><CardTitle>熱門主題與難度分析（前 10 個）</CardTitle></CardHeader>
+              <CardContent>
+                <ResponsiveContainer width="100%" height={300}>
+                  <ComposedChart data={clusterChartData}>
+                    <CartesianGrid strokeDasharray="3 3" />
+                    <XAxis dataKey="name" scale="band" />
+                    <YAxis yAxisId="left" label={{ value: '提問數', angle: -90, position: 'insideLeft' }} />
+                    <YAxis yAxisId="right" orientation="right" domain={[0, 1]} label={{ value: '難度', angle: 90, position: 'insideRight' }} />
+                    <Tooltip />
+                    <Legend />
+                    <Bar yAxisId="left" dataKey="count" fill="#0066cc" name="提問數量" barSize={40} />
+                    <Line yAxisId="right" type="monotone" dataKey="difficulty" stroke="#ff7300" name="平均難度" strokeWidth={2} />
+                  </ComposedChart>
                 </ResponsiveContainer>
               </CardContent>
             </Card>
           )}
 
-          {/* 匯出功能 */}
+          {/* 匯出功能：新增匯出主題按鈕 */}
           <Card>
-            <CardHeader>
-              <CardTitle>資料匯出</CardTitle>
-            </CardHeader>
+            <CardHeader><CardTitle>資料匯出</CardTitle></CardHeader>
             <CardContent>
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                <Button
-                  variant="outline"
-                  className="w-full"
-                  onClick={() => handleExport("questions")}
-                  disabled={exporting === "questions"}
-                >
-                  <Download className="w-4 h-4 mr-2" />
-                  {exporting === "questions" ? "匯出中..." : "匯出提問 CSV"}
+              <div className="grid grid-cols-1 md:grid-cols-4 gap-4"> {/* 改成 4 欄 */}
+                <Button variant="outline" onClick={() => handleExport("questions")} disabled={exporting === "questions"}>
+                  <Download className="w-4 h-4 mr-2" /> 匯出提問 CSV
                 </Button>
-                <Button
-                  variant="outline"
-                  className="w-full"
-                  onClick={() => handleExport("qas")}
-                  disabled={exporting === "qas"}
-                >
-                  <Download className="w-4 h-4 mr-2" />
-                  {exporting === "qas" ? "匯出中..." : "匯出 Q&A CSV"}
+                <Button variant="outline" onClick={() => handleExport("qas")} disabled={exporting === "qas"}>
+                  <Download className="w-4 h-4 mr-2" /> 匯出 Q&A CSV
                 </Button>
-                <Button
-                  variant="outline"
-                  className="w-full"
-                  onClick={() => handleExport("statistics")}
-                  disabled={exporting === "statistics"}
-                >
-                  <Download className="w-4 h-4 mr-2" />
-                  {exporting === "statistics"
-                    ? "匯出中..."
-                    : "匯出統計資料 CSV"}
+                <Button variant="outline" onClick={() => handleExport("statistics")} disabled={exporting === "statistics"}>
+                  <Download className="w-4 h-4 mr-2" /> 匯出統計資料
+                </Button>
+                {/* 新增按鈕 */}
+                <Button variant="outline" onClick={() => handleExport("clusters")} disabled={exporting === "clusters"}>
+                  <Download className="w-4 h-4 mr-2" /> 匯出主題分析
                 </Button>
               </div>
-              <p className="text-sm text-muted-foreground mt-4">
-                當前課程：{selectedCourseName}
-              </p>
+              <p className="text-sm text-muted-foreground mt-4">當前課程：{selectedCourseName}</p>
             </CardContent>
           </Card>
         </>

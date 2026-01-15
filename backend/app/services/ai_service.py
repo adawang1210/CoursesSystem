@@ -163,6 +163,49 @@ class AIService:
         if not result:
             return {"topic_label": "未命名主題", "summary": ""}
         return result
+    
+    def perform_advanced_clustering(self, questions: List[str]) -> Dict[str, Any]:
+        """
+        [進階版] 讓 AI 針對輸入的問題列表進行「多主題拆分」
+        """
+        if not questions:
+            return {"clusters": []}
+
+        # 1. 幫問題加上索引編號，讓 AI 可以回傳 index
+        # 限制單一問題長度以免 Token 爆炸
+        indexed_text = "\n".join([f"ID_{i}: {q[:200]}" for i, q in enumerate(questions)])
+        
+        system_prompt = """
+        你是一個精準的提問分類系統。請分析使用者的問題列表，並將它們歸類到不同的主題群組中。
+        
+        規則：
+        1. 根據語意相似性將問題分組 (例如：技術問題一組、行政規則一組)。
+        2. 請給每個群組一個簡短精確的標題 (Topic Label)。
+        3. 請回傳嚴格的 JSON 格式，格式如下：
+        {
+            "clusters": [
+                {
+                    "topic_label": "主題名稱",
+                    "summary": "主題摘要",
+                    "question_indices": [0, 2, 5] // 對應原始列表的索引 (整數)
+                }
+            ]
+        }
+        """
+        
+        messages = [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": f"請對以下問題進行分類：\n{indexed_text}"}
+        ]
+
+        # 呼叫 LLM
+        result = self._call_ai_api(messages, json_mode=True)
+        
+        if not result:
+            # 發生錯誤時回傳空陣列
+            return {"clusters": []}
+            
+        return result
 
 # 建立全域實例
 ai_service = AIService()

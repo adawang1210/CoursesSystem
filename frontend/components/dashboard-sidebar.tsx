@@ -10,6 +10,7 @@ import {
   Megaphone,
   BarChart3,
   MessageCircle,
+  Network,
 } from "lucide-react";
 
 const sidebarItems = [
@@ -31,7 +32,17 @@ const sidebarItems = [
     icon: ClipboardList,
     href: "/dashboard/questions",
   },
-  { id: "qa", label: "Q&A 管理", icon: MessageSquare, href: "/dashboard/qa" },
+  {
+    id: "clustering",
+    label: "AI 聚類",
+    icon: Network,
+    href: "/dashboard/clustering",
+  },
+  { id: "qa", 
+    label: "Q&A 管理", 
+    icon: MessageSquare, 
+    href: "/dashboard/qa" 
+  },
   {
     id: "announcements",
     label: "公告管理",

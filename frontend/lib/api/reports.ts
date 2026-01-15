@@ -3,6 +3,8 @@
  */
 
 import { apiClient, ApiResponse } from "../api-client";
+// 1. 🔥 修改：從 ai.ts 匯入 ClusterSummary，避免重複定義
+import { ClusterSummary } from "./ai";
 
 /**
  * 統計資料介面
@@ -24,15 +26,8 @@ export interface Statistics {
   cluster_count: number;
 }
 
-/**
- * 聚類摘要介面
- */
-export interface ClusterSummary {
-  cluster_id: string;
-  question_count: number;
-  avg_difficulty: number;
-  top_keywords: string[];
-}
+// 2. 🔥 修改：刪除這裡原本的 export interface ClusterSummary { ... }
+// 因為已經改從上方 import 了
 
 /**
  * 報表 API
@@ -131,6 +126,25 @@ export const reportsApi = {
       process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
     const response = await fetch(
       `${API_BASE_URL}/reports/export/statistics?${queryString}`
+    );
+    if (!response.ok) {
+      throw new Error(`匯出失敗: ${response.status}`);
+    }
+    return await response.blob();
+  },
+
+  // 3. 🔥 新增：匯出 AI 主題分析報表
+  async exportClusters(params: { course_id: string }): Promise<Blob> {
+    const queryString = new URLSearchParams(
+      Object.entries(params).filter(([_, v]) => v !== undefined) as [
+        string,
+        string
+      ][]
+    ).toString();
+    const API_BASE_URL =
+      process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+    const response = await fetch(
+      `${API_BASE_URL}/reports/export/clusters?${queryString}`
     );
     if (!response.ok) {
       throw new Error(`匯出失敗: ${response.status}`);

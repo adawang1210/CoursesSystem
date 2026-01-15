@@ -4,6 +4,7 @@ AI 層整合 API
 """
 from fastapi import APIRouter, HTTPException, Query, BackgroundTasks
 from typing import List, Optional
+from bson import ObjectId
 from ..models.schemas import AIAnalysisRequest, AIAnalysisResult, Cluster
 from ..services.question_service import question_service
 from ..services.ai_service import ai_service
@@ -126,10 +127,10 @@ async def generate_response_draft(
     async def _generate_and_save_draft(qid: str, text: str):
         try:
             # 呼叫 AI 生成草稿
-            draft = await ai_service.generate_response_draft(text)
+            draft = ai_service.generate_response_draft(text)
             
             # 呼叫 AI 生成摘要 (順便做)
-            analysis = await ai_service.analyze_question(text)
+            analysis = ai_service.analyze_question(text)
             summary = analysis.get("summary", "")
             
             # 構造更新物件 (利用現有的 update_ai_analysis 介面)
@@ -172,33 +173,83 @@ async def generate_course_clusters(
     """
     # 定義背景任務
     async def _run_clustering_task(cid: str):
-        print(f"🤖 開始執行課程 {cid} 的聚類分析...")
+        print(f"🤖 [升級版] 開始執行課程 {cid} 的多維聚類分析...")
+        from ..database import db
+        from bson import ObjectId
+        from datetime import datetime
+        
         try:
-            # 1. 撈出該課程所有還沒分群的問題 (Pending + Cluster=None)
+            # 1. 撈出待處理問題
             questions = await question_service.get_pending_questions_for_ai(cid, limit=50)
-            
             if not questions:
                 print("沒有需要分群的問題")
                 return
 
-            # 簡化版邏輯：直接把前 10 個問題丟給 AI 請它歸納一個主題
-            # (實務上這裡可以用 K-Means 或更複雜的邏輯，但先從簡單的開始)
             q_texts = [q['question_text'] for q in questions]
             
-            # 呼叫 AI 歸納主題
-            cluster_result = await ai_service.generate_cluster_label(q_texts)
+            # 🔥 修改點：改呼叫新的分群方法
+            # (請確認 ai_service 已經有 perform_advanced_clustering 方法)
+            ai_result = ai_service.perform_advanced_clustering(q_texts)
             
-            topic_label = cluster_result.get("topic_label", "未命名主題")
-            summary = cluster_result.get("summary", "")
+            # 防呆：確保回傳結構正確
+            if not ai_result or "clusters" not in ai_result:
+                print("❌ AI 回傳格式錯誤，無法分群")
+                return
+
+            clusters_data = ai_result.get("clusters", [])
+            print(f"📊 AI 將問題分成了 {len(clusters_data)} 個群組")
             
-            print(f"🔍 AI 歸納出的主題: {topic_label}")
+            database = db.get_db()
             
-            # TODO: 這裡應該要呼叫 service 把這些問題的 cluster_id 更新
-            # 並且建立一個新的 Cluster Document
-            # (這部分邏輯較複雜，建議先實作到這裡確認 AI 能跑)
+            # 2. 遍歷 AI 分好的每一個群組
+            for cluster_data in clusters_data:
+                topic_label = cluster_data.get("topic_label", "未命名群組")
+                indices = cluster_data.get("question_indices", []) # 這是 [0, 1, 4...]
+                
+                if not indices:
+                    continue
+                    
+                print(f"  📂 處理群組: {topic_label} (包含 {len(indices)} 題)")
+                
+                # A. 建立 Cluster 文件
+                new_cluster_id = ObjectId()
+                new_cluster_doc = {
+                    "_id": new_cluster_id,
+                    "course_id": cid, # 這裡假設 cid 是 string
+                    "topic_label": topic_label,
+                    "summary": cluster_data.get("summary", ""),
+                    "keywords": [], 
+                    "question_count": len(indices),
+                    "avg_difficulty": 0.0, 
+                    "created_at": datetime.utcnow(),
+                    "updated_at": datetime.utcnow()
+                }
+                await database["clusters"].insert_one(new_cluster_doc)
+                
+                # B. 找出這個群組對應的 Question IDs
+                # 因為 AI 回傳的是 index (0, 1, 2...)，我們要映射回 questions 陣列裡的 _id
+                target_q_ids = []
+                for idx in indices:
+                    # 防呆：確保 index 沒有超出範圍
+                    if isinstance(idx, int) and 0 <= idx < len(questions):
+                        target_q_ids.append(ObjectId(questions[idx]['_id']))
+                
+                # C. 批次更新這些問題的 cluster_id
+                if target_q_ids:
+                    await database["questions"].update_many(
+                        {"_id": {"$in": target_q_ids}},
+                        {"$set": {
+                            "cluster_id": str(new_cluster_id),
+                            "updated_at": datetime.utcnow()
+                        }}
+                    )
+
+            print(f"✅ 多維聚類分析完成！")
             
         except Exception as e:
             print(f"❌ 聚類分析失敗: {str(e)}")
+            import traceback
+            traceback.print_exc()
 
     background_tasks.add_task(_run_clustering_task, course_id)
 
@@ -222,52 +273,76 @@ async def get_clusters_summary(course_id: str):
     
     database = db.get_db()
     collection = database["questions"]
+
+    # 1. 查詢條件：同時支援 String 與 ObjectId 格式的 course_id
+    match_condition = {
+        "$or": [
+            {"course_id": course_id},               
+            {"course_id": ObjectId(course_id)}      
+        ],
+        "cluster_id": {"$ne": None}                 
+    }
     
     pipeline = [
-        {
-            "$match": {
-                "course_id": course_id,
-                "cluster_id": {"$ne": None}
-            }
-        },
-        {
-            "$group": {
-                "_id": "$cluster_id",
-                "count": {"$sum": 1},
-                "avg_difficulty": {"$avg": "$difficulty_score"},
-                "keywords": {"$push": "$keywords"}
-            }
-        },
-        {
-            "$sort": {"count": -1}
-        }
+        {"$match": match_condition},
+        {"$group": {
+            "_id": "$cluster_id",
+            "count": {"$sum": 1},
+            # 注意：如果資料庫沒有 difficulty_score 欄位，這裡會是 null
+            "avg_difficulty": {"$avg": "$difficulty_score"},
+            # 🔥 修正 1：必須把關鍵字收集起來，下面的迴圈才讀得到
+            "keywords": {"$push": "$keywords"} 
+        }}
     ]
     
     results = await collection.aggregate(pipeline).to_list(length=None)
+
+    clusters_collection = database["clusters"]
     
-    # 處理關鍵字：展平並統計頻率
     clusters = []
     for result in results:
+        # 2. 處理關鍵字：從 questions 聚合結果計算 Top 5
         all_keywords = []
-        for kw_list in result["keywords"]:
-            all_keywords.extend(kw_list)
+        # 加上防呆，確保 keywords 存在且是列表
+        raw_keywords = result.get("keywords", [])
+        for kw_list in raw_keywords:
+            if isinstance(kw_list, list):
+                all_keywords.extend(kw_list)
         
-        # 統計關鍵字頻率
+        # 統計頻率
         keyword_freq = {}
         for kw in all_keywords:
-            keyword_freq[kw] = keyword_freq.get(kw, 0) + 1
+            if kw: # 排除空字串
+                keyword_freq[kw] = keyword_freq.get(kw, 0) + 1
         
-        # 取前 5 個最常見的關鍵字
+        # 取前 5 個
         top_keywords = sorted(
             keyword_freq.items(),
             key=lambda x: x[1],
             reverse=True
         )[:5]
         
+        # 3. 取得 Cluster 詳細資訊 (Topic Label)
+        topic_label = "未命名主題"
+        try:
+            cluster_oid = ObjectId(result["_id"])
+            cluster_info = await clusters_collection.find_one({"_id": cluster_oid})
+            if cluster_info:
+                topic_label = cluster_info.get("topic_label", "未命名主題")
+        except:
+            pass # ID 格式錯誤或其他問題則忽略
+            
+        # 🔥 修正 2：確保 avg_difficulty 絕對不是 None
+        # 如果是 None，則強制轉為 0，避免前端 toFixed 報錯
+        avg_diff = result.get("avg_difficulty")
+        if avg_diff is None:
+            avg_diff = 0.0
+
         clusters.append({
-            "cluster_id": result["_id"],
+            "cluster_id": str(result["_id"]),
+            "topic_label": topic_label,
             "question_count": result["count"],
-            "avg_difficulty": result.get("avg_difficulty", 0),
+            "avg_difficulty": avg_diff, # 這裡傳出去的一定是數字
             "top_keywords": [kw[0] for kw in top_keywords]
         })
     
