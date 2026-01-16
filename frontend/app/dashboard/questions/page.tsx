@@ -161,23 +161,87 @@ export default function QuestionsPage() {
   // 🔥 新增：重新生成草稿
   const handleRegenerateDraft = async () => {
     if (!selectedQuestion) return;
+    
     setIsRegenerating(true);
+    
     try {
+      // 1. 觸發後端任務
       const success = await aiApi.generateDraft(selectedQuestion.id);
+      
       if (success) {
-        toast({ title: "成功", description: "AI 已重新生成草稿，請稍候刷新" });
-        // 這裡簡單處理：重新載入列表 (實務上可以直接更新 state)
-        await loadQuestions();
-        // 嘗試更新當前視窗內容 (需從新列表中找回該問題)
-        // 簡化：先關閉視窗讓使用者重開，或提示刷新
-        setIsAiModalOpen(false); 
+        toast({ title: "AI 思考中", description: "正在撰寫草稿，請稍候..." });
+        
+        // 2. 開始輪詢
+        let retryCount = 0;
+        const maxRetries = 15;
+        
+        const pollInterval = setInterval(async () => {
+          retryCount++;
+          
+          try {
+            // 🔥 修正 1: 加上 "as any" 強制轉型，解決 "類型 '{}' 沒有屬性" 的錯誤
+            const updatedData = await aiApi.getQuestionAnalysis(selectedQuestion.id) as any;
+            
+            // 檢查是否有新的草稿 (容錯處理：檢查不同可能的欄位名稱)
+            const newDraft = updatedData?.ai_response_draft || updatedData?.ai_analysis?.response_draft;
+            
+            if (newDraft) {
+              clearInterval(pollInterval);
+              
+              // A. 更新文字框
+              setDraftContent(newDraft);
+              
+              // B. 更新選取狀態 (這裡也需要 any，因為 prev 可能是 DisplayQuestion)
+              setSelectedQuestion((prev) => prev ? { 
+                ...prev, 
+                aiResponseDraft: newDraft,
+                // 防止這些欄位不存在導致 undefined，給予預設值或保留原值
+                aiSummary: updatedData.ai_summary || prev.aiSummary,
+                difficulty: updatedData.difficulty_level || prev.difficulty,
+                keywords: updatedData.keywords || prev.keywords
+              } : null);
+
+              // C. 更新列表
+              setQuestions((prev) => prev.map(q => 
+                q.id === selectedQuestion.id 
+                  ? { 
+                      ...q, 
+                      aiResponseDraft: newDraft,
+                      aiSummary: updatedData.ai_summary || q.aiSummary,
+                      difficulty: updatedData.difficulty_level || q.difficulty,
+                      keywords: updatedData.keywords || q.keywords
+                    } 
+                  : q
+              ));
+
+              setIsRegenerating(false);
+              toast({ title: "生成完成", description: "AI 草稿已更新！" });
+              
+            } else if (retryCount >= maxRetries) {
+              // 超時處理
+              clearInterval(pollInterval);
+              setIsRegenerating(false);
+              
+              // 🔥 修正 2: 移除 variant: "warning"，改用 default (因為 TypeScript 報錯說沒有 warning)
+              toast({ 
+                title: "生成時間較長", 
+                description: "AI 還在背景運作中，請稍後手動刷新頁面查看。",
+                // variant: "default" // 預設就是 default，所以不需要寫
+              });
+            }
+          } catch (err) {
+            console.error("輪詢檢查失敗:", err);
+          }
+        }, 2000); // 每 2 秒檢查一次
+
       } else {
-        toast({ title: "錯誤", description: "生成失敗", variant: "destructive" });
+        setIsRegenerating(false);
+        toast({ title: "錯誤", description: "無法啟動 AI 生成任務", variant: "destructive" });
       }
     } catch (error) {
       console.error(error);
-    } finally {
       setIsRegenerating(false);
+      toast({ title: "錯誤", description: "連線發生錯誤", variant: "destructive" });
     }
   };
 

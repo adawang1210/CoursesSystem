@@ -132,13 +132,23 @@ async def generate_response_draft(
             # 呼叫 AI 生成摘要 (順便做)
             analysis = ai_service.analyze_question(text)
             summary = analysis.get("summary", "")
+
+            new_difficulty = analysis.get("difficulty_score")
+            if new_difficulty is None:
+                # 嘗試讀取舊資料，如果舊資料也是 None，就給 0.5
+                old_diff = question.get("difficulty_score")
+                new_difficulty = old_diff if old_diff is not None else 0.5
+
+            new_keywords = analysis.get("keywords")
+            if new_keywords is None:
+                 new_keywords = question.get("keywords") or []
             
             # 構造更新物件 (利用現有的 update_ai_analysis 介面)
             # 注意：這裡假設您已經在 schemas.py 的 AIAnalysisResult 加入了 response_draft 欄位
             result = AIAnalysisResult(
                 question_id=qid,
-                difficulty_score=question.get("difficulty_score", 0.5), # 保持原值
-                keywords=question.get("keywords", []), # 保持原值
+                difficulty_score=float(new_difficulty), # 保持原值
+                keywords=new_keywords, # 保持原值
                 cluster_id=question.get("cluster_id"), # 保持原值
                 response_draft=draft,    # <--- 更新重點
                 summary=summary          # <--- 更新重點
@@ -149,6 +159,8 @@ async def generate_response_draft(
             
         except Exception as e:
             print(f"❌ 草稿生成失敗: {str(e)}")
+            import traceback
+            traceback.print_exc()
 
     # 3. 加入背景任務 (讓 API 立刻回應，不用等 AI)
     background_tasks.add_task(
