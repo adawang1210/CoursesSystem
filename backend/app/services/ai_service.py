@@ -164,33 +164,56 @@ class AIService:
             return {"topic_label": "未命名主題", "summary": ""}
         return result
     
-    def perform_advanced_clustering(self, questions: List[str]) -> Dict[str, Any]:
+    def perform_advanced_clustering(
+        self, 
+        questions: List[str], 
+        max_new_topics: int = 5,  # 🔥 改名：這裡接收的是「還能新增幾個」
+        existing_topics: List[str] = None
+    ) -> Dict[str, Any]:
         """
         [進階版] 讓 AI 針對輸入的問題列表進行「多主題拆分」
+        :param max_new_topics: 允許新增的全新主題數量 (已扣除既有主題)
+        :param existing_topics: 既有主題列表 (AI 應優先使用)
         """
         if not questions:
             return {"clusters": []}
 
-        # 1. 幫問題加上索引編號，讓 AI 可以回傳 index
-        # 限制單一問題長度以免 Token 爆炸
+        # 1. 幫問題加上索引編號
         indexed_text = "\n".join([f"ID_{i}: {q[:200]}" for i, q in enumerate(questions)])
         
-        system_prompt = """
-        你是一個精準的提問分類系統。請分析使用者的問題列表，並將它們歸類到不同的主題群組中。
+        # 2. 動態建構既有主題 context
+        topic_context = ""
+        if existing_topics and len(existing_topics) > 0:
+            topics_str = "、".join(existing_topics)
+            topic_context = f"""
+            3. **既有主題清單**：目前資料庫已有以下主題：【{topics_str}】。
+               - 請 **優先** 將問題歸類到上述既有主題中。
+               - 歸類到既有主題 **不消耗** 新增額度。
+            """
+
+        # 3. 使用 f-string 注入 max_new_topics 變數
+        system_prompt = f"""
+        你是一個精準的提問分類系統。請分析使用者的問題列表並進行歸類。
         
         規則：
-        1. 根據語意相似性將問題分組 (例如：技術問題一組、行政規則一組)。
-        2. 請給每個群組一個簡短精確的標題 (Topic Label)。
-        3. 請回傳嚴格的 JSON 格式，格式如下：
-        {
+        1. **優先歸類**：請優先檢查問題是否屬於「既有主題」。
+        2. **新增限制**：如果問題真的無法歸入既有主題，你可以建立新的主題，但 **最多只能建立 {max_new_topics} 個全新的主題**。
+           - 如果新增額度用完，請將剩餘問題歸入「其他」或強制併入最接近的既有主題。
+        {topic_context}
+        4. **合併策略**：請積極合併語意相似的主題 (例如：'Python 迴圈' 與 'For Loop' 應合併)。
+        5. 🔥 **強制覆蓋 (重要)**：**列表中的「每一個」問題都必須被分配到某個群組中 (Index 0 到 {len(questions)-1})，不能有遺漏。**
+           - 請確保回傳的 JSON 中，所有問題的 Index 都有出現。
+        
+        6. **格式要求**：請回傳嚴格的 JSON 格式，不要包含 Markdown 標記。格式如下：
+        {{
             "clusters": [
-                {
-                    "topic_label": "主題名稱",
-                    "summary": "主題摘要",
+                {{
+                    "topic_label": "主題名稱 (5-10字)",
+                    "summary": "主題摘要 (簡述該群組包含的問題類型)",
                     "question_indices": [0, 2, 5] // 對應原始列表的索引 (整數)
-                }
+                }}
             ]
-        }
+        }}
         """
         
         messages = [
@@ -202,7 +225,6 @@ class AIService:
         result = self._call_ai_api(messages, json_mode=True)
         
         if not result:
-            # 發生錯誤時回傳空陣列
             return {"clusters": []}
             
         return result

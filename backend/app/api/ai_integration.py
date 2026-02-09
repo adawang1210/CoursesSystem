@@ -5,7 +5,12 @@ AI 層整合 API
 from fastapi import APIRouter, HTTPException, Query, BackgroundTasks
 from typing import List, Optional
 from bson import ObjectId
-from ..models.schemas import AIAnalysisRequest, AIAnalysisResult, Cluster
+from ..models.schemas import (
+    AIAnalysisRequest, 
+    AIAnalysisResult, 
+    ClusterGenerateRequest, # 確保也有引入這個
+    ClusterUpdate           # 🔥 請確認引入的是這個名稱
+)
 from ..services.question_service import question_service
 from ..services.ai_service import ai_service
 
@@ -177,97 +182,144 @@ async def generate_response_draft(
 
 @router.post("/clusters/generate", summary="執行課程主題聚類分析")
 async def generate_course_clusters(
-    course_id: str,
+    request: ClusterGenerateRequest,  # 🔥 修改 1：改用 Pydantic Model 接收 JSON Body
     background_tasks: BackgroundTasks
 ):
     """
     分析該課程所有「未歸類」的問題，嘗試進行自動分群與命名
     """
+    course_id = request.course_id
+    max_clusters = request.max_clusters
+
     # 定義背景任務
-    async def _run_clustering_task(cid: str):
-        print(f"🤖 [升級版] 開始執行課程 {cid} 的多維聚類分析...")
+    async def _run_clustering_task(cid: str, max_c: int):
+        print(f"🤖 [智能歸檔模式] 開始分析課程 {cid} (總上限 {max_c} 組)...")
         from ..database import db
         from bson import ObjectId
         from datetime import datetime
         
         try:
-            # 1. 撈出待處理問題
+            database = db.get_db()
+
+            # -------------------------------------------------------
+            # 🔥 步驟 1: 先撈出「現有的」聚類標籤 (Context)
+            # -------------------------------------------------------
+            existing_clusters_cursor = database["clusters"].find({"course_id": cid})
+            existing_clusters = await existing_clusters_cursor.to_list(length=None)
+            
+            # 建立查表字典
+            existing_topic_map = {c["topic_label"]: c["_id"] for c in existing_clusters}
+            existing_topic_names = list(existing_topic_map.keys())
+            
+            # 🔥 關鍵修改：計算「剩餘額度」
+            current_count = len(existing_topic_names)
+            remaining_quota = max_c - current_count
+            
+            # 若既有分類已超過或等於上限，則不允許新增 (或設為 0)
+            if remaining_quota < 0:
+                remaining_quota = 0
+                
+            print(f"📚 狀態: 既有 {current_count} 組 | 上限 {max_c} 組 | 💡 可新增 {remaining_quota} 組")
+
+            # -------------------------------------------------------
+            # 🔥 步驟 2: 撈出「未分類」的問題
+            # -------------------------------------------------------
             questions = await question_service.get_pending_questions_for_ai(cid, limit=50)
+            
             if not questions:
-                print("沒有需要分群的問題")
+                print("✅ 沒有新的未分類問題，工作結束")
                 return
 
             q_texts = [q['question_text'] for q in questions]
             
-            # 🔥 修改點：改呼叫新的分群方法
-            # (請確認 ai_service 已經有 perform_advanced_clustering 方法)
-            ai_result = ai_service.perform_advanced_clustering(q_texts)
+            # -------------------------------------------------------
+            # 🔥 步驟 3: 呼叫 AI (傳入計算後的額度)
+            # -------------------------------------------------------
+            # 注意：這裡的參數名稱必須與 ai_service.py 定義的一致 (max_new_topics)
+            ai_result = ai_service.perform_advanced_clustering(
+                q_texts, 
+                max_new_topics=remaining_quota,  # <--- 改用這個參數
+                existing_topics=existing_topic_names
+            )
             
-            # 防呆：確保回傳結構正確
             if not ai_result or "clusters" not in ai_result:
-                print("❌ AI 回傳格式錯誤，無法分群")
+                print("❌ AI 回傳格式錯誤")
                 return
 
             clusters_data = ai_result.get("clusters", [])
-            print(f"📊 AI 將問題分成了 {len(clusters_data)} 個群組")
-            
-            database = db.get_db()
-            
-            # 2. 遍歷 AI 分好的每一個群組
+            print(f"📊 AI 將 {len(q_texts)} 個新問題分成了 {len(clusters_data)} 組")
+
+            # -------------------------------------------------------
+            # 🔥 步驟 4: 智慧寫入 (比對新舊)
+            # -------------------------------------------------------
+            # (這部分的邏輯保持不變，負責將 AI 結果寫入資料庫)
             for cluster_data in clusters_data:
                 topic_label = cluster_data.get("topic_label", "未命名群組")
-                indices = cluster_data.get("question_indices", []) # 這是 [0, 1, 4...]
+                indices = cluster_data.get("question_indices", [])
                 
                 if not indices:
                     continue
+                
+                if topic_label in existing_topic_map:
+                    # 歸入既有分類
+                    target_cluster_id = existing_topic_map[topic_label]
+                    print(f"  🔄 歸入既有分類: {topic_label}")
                     
-                print(f"  📂 處理群組: {topic_label} (包含 {len(indices)} 題)")
-                
-                # A. 建立 Cluster 文件
-                new_cluster_id = ObjectId()
-                new_cluster_doc = {
-                    "_id": new_cluster_id,
-                    "course_id": cid, # 這裡假設 cid 是 string
-                    "topic_label": topic_label,
-                    "summary": cluster_data.get("summary", ""),
-                    "keywords": [], 
-                    "question_count": len(indices),
-                    "avg_difficulty": 0.0, 
-                    "created_at": datetime.utcnow(),
-                    "updated_at": datetime.utcnow()
-                }
-                await database["clusters"].insert_one(new_cluster_doc)
-                
-                # B. 找出這個群組對應的 Question IDs
-                # 因為 AI 回傳的是 index (0, 1, 2...)，我們要映射回 questions 陣列裡的 _id
+                    await database["clusters"].update_one(
+                        {"_id": target_cluster_id},
+                        {
+                            "$inc": {"question_count": len(indices)},
+                            "$set": {"updated_at": datetime.utcnow()}
+                        }
+                    )
+                else:
+                    # 建立新分類 (只有在額度內 AI 才會回傳新的)
+                    print(f"  ✨ 建立全新分類: {topic_label}")
+                    new_cluster_id = ObjectId()
+                    target_cluster_id = new_cluster_id
+                    
+                    new_cluster_doc = {
+                        "_id": new_cluster_id,
+                        "course_id": cid, 
+                        "topic_label": topic_label,
+                        "summary": cluster_data.get("summary", ""),
+                        "keywords": [], 
+                        "question_count": len(indices),
+                        "avg_difficulty": 0.0, 
+                        "is_locked": False, 
+                        "created_at": datetime.utcnow(),
+                        "updated_at": datetime.utcnow()
+                    }
+                    await database["clusters"].insert_one(new_cluster_doc)
+                    existing_topic_map[topic_label] = new_cluster_id
+
+                # 更新問題關聯
                 target_q_ids = []
                 for idx in indices:
-                    # 防呆：確保 index 沒有超出範圍
                     if isinstance(idx, int) and 0 <= idx < len(questions):
                         target_q_ids.append(ObjectId(questions[idx]['_id']))
                 
-                # C. 批次更新這些問題的 cluster_id
                 if target_q_ids:
                     await database["questions"].update_many(
                         {"_id": {"$in": target_q_ids}},
                         {"$set": {
-                            "cluster_id": str(new_cluster_id),
+                            "cluster_id": str(target_cluster_id),
                             "updated_at": datetime.utcnow()
                         }}
                     )
 
-            print(f"✅ 多維聚類分析完成！")
+            print(f"✅ 智能分析完成！")
             
         except Exception as e:
             print(f"❌ 聚類分析失敗: {str(e)}")
             import traceback
             traceback.print_exc()
 
-    background_tasks.add_task(_run_clustering_task, course_id)
+    background_tasks.add_task(_run_clustering_task, course_id, max_clusters)
 
     return {
         "success": True,
-        "message": "聚類分析任務已啟動"
+        "message": f"聚類分析任務已啟動 (分類上限: {max_clusters})"
     }
 
 @router.get("/clusters/{course_id}", response_model=dict, summary="取得課程的所有聚類")
@@ -363,4 +415,40 @@ async def get_clusters_summary(course_id: str):
         "data": clusters,
         "total_clusters": len(clusters)
     }
+# 示意：新增更新 Cluster 的 API
+@router.patch("/clusters/{cluster_id}")
+async def update_cluster(cluster_id: str, update_data: ClusterUpdate):
+    """
+    [新增] 手動更新聚類標籤 (助教介入)
+    """
+    from ..database import db
+    from bson import ObjectId
+    from datetime import datetime
+    
+    database = db.get_db()
+    
+    # 1. 準備更新欄位
+    update_fields = {
+        "updated_at": datetime.utcnow()
+    }
+    
+    # 如果有傳入新的標題，就更新 topic_label
+    if update_data.topic_label:
+        update_fields["topic_label"] = update_data.topic_label
+        # 同時記錄這是人工設定的標籤
+        update_fields["manual_label"] = update_data.topic_label
 
+    # 如果有指定鎖定狀態 (預設為 True)
+    if update_data.is_locked is not None:
+        update_fields["is_locked"] = update_data.is_locked
+        
+    # 2. 執行更新
+    result = await database["clusters"].update_one(
+        {"_id": ObjectId(cluster_id)},
+        {"$set": update_fields}
+    )
+    
+    if result.matched_count == 0:
+        return {"success": False, "message": "找不到該聚類主題"}
+        
+    return {"success": True, "message": "更新成功"}

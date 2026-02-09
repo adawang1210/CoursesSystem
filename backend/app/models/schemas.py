@@ -398,6 +398,9 @@ class ClusterBase(BaseModel):
     question_count: int = Field(default=0, description="包含的問題數量")
     avg_difficulty: float = Field(default=0.0, description="平均難度")
 
+    is_locked: bool = Field(default=False, description="是否已被人工鎖定 (若為 True，AI 重新分析時將保留此分類)")
+    manual_label: Optional[str] = Field(None, description="人工手動設定的標籤名稱")
+
 class ClusterCreate(ClusterBase):
     """建立聚類"""
     pass
@@ -411,3 +414,12 @@ class Cluster(ClusterBase):
     class Config:
         populate_by_name = True
 
+class ClusterUpdate(BaseModel):
+    """[新增] 用於 PATCH /ai/clusters/{id} 的請求模型"""
+    topic_label: Optional[str] = Field(None, description="新的主題名稱")
+    is_locked: bool = Field(default=True, description="更新後是否自動鎖定 (預設 True)")
+
+class ClusterGenerateRequest(BaseModel):
+    """[新增] 用於 POST /ai/clusters/generate 的請求模型"""
+    course_id: str = Field(..., description="課程ID")
+    max_clusters: int = Field(default=5, ge=1, le=20, description="希望 AI 分成的最大群組數量")

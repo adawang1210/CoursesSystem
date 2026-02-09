@@ -13,7 +13,9 @@ import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
   ScatterChart, Scatter, ZAxis, ComposedChart, Line // 修正圖表引用
 } from "recharts"
-import { Zap, Download, RefreshCw, AlertCircle } from "lucide-react"
+import { Zap, Download, RefreshCw, AlertCircle, Pencil } from "lucide-react"
+import { Slider } from "@/components/ui/slider" // 🔥 新增 Slider
+import { Label } from "@/components/ui/label"   // 🔥 新增 Label
 import { aiApi, type ClusterSummary } from "@/lib/api/ai"
 import { coursesApi, type Course } from "@/lib/api" // 2. 引入 coursesApi
 import { useToast } from "@/hooks/use-toast"
@@ -25,6 +27,7 @@ export default function ClusteringPage() {
   const [isLoading, setIsLoading] = useState(false)
   const [isClustering, setIsClustering] = useState(false)
   const { toast } = useToast()
+  const [maxClusters, setMaxClusters] = useState<number>(5)
 
   // 5. 初始載入：先抓課程
   useEffect(() => {
@@ -71,10 +74,10 @@ export default function ClusteringPage() {
     }
 
     setIsClustering(true)
-    toast({ title: "AI 分析中", description: "正在執行聚類運算，這可能需要幾秒鐘..." })
+    toast({ title: "AI 分析中", description: `正在執行聚類 (上限 ${maxClusters} 個)，請稍候...` })
     
     try {
-      const success = await aiApi.runClustering(selectedCourse)
+      const success = await aiApi.runClustering(selectedCourse, maxClusters)
       if (success) {
         toast({ title: "分析完成", description: "已更新聚類結果" })
         // 稍等一下再重新抓取，確保 DB 寫入完成
@@ -117,6 +120,20 @@ export default function ClusteringPage() {
                     ))}
                 </SelectContent>
             </Select>
+
+            <div className="flex items-center gap-3 px-4 py-2 bg-secondary/20 rounded-md border mr-2">
+                <Label className="text-sm whitespace-nowrap text-muted-foreground">
+                    分類上限: <span className="font-bold text-foreground">{maxClusters}</span>
+                </Label>
+                <Slider
+                    value={[maxClusters]}
+                    onValueChange={(vals) => setMaxClusters(vals[0])}
+                    max={15}
+                    min={2}
+                    step={1}
+                    className="w-[100px]"
+                />
+            </div>
 
             <Button 
                 onClick={() => selectedCourse && fetchClusters(selectedCourse)} 
@@ -226,8 +243,18 @@ export default function ClusteringPage() {
             {clusters.map((cluster) => (
                 <div
                 key={cluster.cluster_id}
-                className="p-4 border rounded-lg hover:bg-secondary/50 transition-colors"
+                className="p-4 border rounded-lg hover:bg-secondary/50 transition-colors relative group"
                 >
+
+                <div className="absolute top-3 right-3 opacity-0 group-hover:opacity-100 transition-opacity">
+                        <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => {
+                            toast({ title: "功能開發中", description: `即將編輯: ${cluster.topic_label}` })
+                            // 這裡未來會連接到 setEditingCluster(cluster) 與 setIsEditOpen(true)
+                        }}>
+                            <Pencil className="w-4 h-4 text-muted-foreground" />
+                        </Button>
+                    </div>
+
                 <div className="flex justify-between items-start mb-2">
                     <div>
                     <h3 className="font-semibold text-lg">

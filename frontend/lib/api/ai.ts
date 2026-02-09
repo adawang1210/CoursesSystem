@@ -48,9 +48,13 @@ export const aiApi = {
    * [手動觸發] 執行課程的聚類分析任務
    * @param courseId 課程 ID
    */
-  runClustering: async (courseId: string): Promise<boolean> => {
+  runClustering: async (courseId: string, maxClusters: number = 5): Promise<boolean> => {
     try {
-      await apiClient.post(`/ai/clusters/generate?course_id=${courseId}`, {});
+      // 將參數帶入 API 請求
+      await apiClient.post(`/ai/clusters/generate`, { 
+        course_id: courseId, 
+        max_clusters: maxClusters 
+      });
       return true;
     } catch (error) {
       console.error("Failed to trigger clustering:", error);
@@ -80,6 +84,15 @@ export const aiApi = {
       const response = await apiClient.get(`/questions/${questionId}`);
       return response.data;
     } catch (error) {
+      return null;
+    }
+  },
+  updateCluster: async (clusterId: string, data: { topic_label?: string; is_locked?: boolean }) => {
+    try {
+      const response = await apiClient.patch(`/ai/clusters/${clusterId}`, data);
+      return response.data;
+    } catch (error) {
+      console.error("Failed to update cluster:", error);
       return null;
     }
   }
