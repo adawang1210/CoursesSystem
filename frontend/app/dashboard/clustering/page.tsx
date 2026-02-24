@@ -8,33 +8,49 @@ import {
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from "@/components/ui/select" // 1. 新增 Select 元件
+} from "@/components/ui/select"
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
-  ScatterChart, Scatter, ZAxis, ComposedChart, Line // 修正圖表引用
+  ScatterChart, Scatter, ZAxis
 } from "recharts"
-import { Zap, Download, RefreshCw, AlertCircle, Pencil } from "lucide-react"
-import { Slider } from "@/components/ui/slider" // 🔥 新增 Slider
-import { Label } from "@/components/ui/label"   // 🔥 新增 Label
+import { Zap, RefreshCw, AlertCircle, Pencil, Plus } from "lucide-react" // 🔥 新增 Plus
+import { Slider } from "@/components/ui/slider"
+import { Label } from "@/components/ui/label"
+import { Input } from "@/components/ui/input" // 🔥 新增 Input
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogFooter,
+} from "@/components/ui/dialog" // 🔥 新增 Dialog 相關組件
 import { aiApi, type ClusterSummary } from "@/lib/api/ai"
-import { coursesApi, type Course } from "@/lib/api" // 2. 引入 coursesApi
+import { coursesApi, type Course } from "@/lib/api"
 import { useToast } from "@/hooks/use-toast"
 
 export default function ClusteringPage() {
   const [clusters, setClusters] = useState<ClusterSummary[]>([])
-  const [courses, setCourses] = useState<Course[]>([]) // 3. 儲存課程列表
-  const [selectedCourse, setSelectedCourse] = useState<string>("") // 4. 儲存選中的課程 ID
+  const [courses, setCourses] = useState<Course[]>([])
+  const [selectedCourse, setSelectedCourse] = useState<string>("")
   const [isLoading, setIsLoading] = useState(false)
   const [isClustering, setIsClustering] = useState(false)
   const { toast } = useToast()
   const [maxClusters, setMaxClusters] = useState<number>(5)
 
-  // 5. 初始載入：先抓課程
+  // 🔥 新增：編輯/新增 Dialog 的狀態
+  const [isEditDialogOpen, setIsEditDialogOpen] = useState(false)
+  const [editingCluster, setEditingCluster] = useState<ClusterSummary | null>(null)
+  const [editLabel, setEditLabel] = useState("")
+
+  const [isAddDialogOpen, setIsAddDialogOpen] = useState(false)
+  const [addLabel, setAddLabel] = useState("")
+
+  // 初始載入：先抓課程
   useEffect(() => {
     loadCourses()
   }, [])
 
-  // 6. 當課程改變時，抓取該課程的聚類資料
+  // 當課程改變時，抓取該課程的聚類資料
   useEffect(() => {
     if (selectedCourse) {
       fetchClusters(selectedCourse)
@@ -93,6 +109,36 @@ export default function ClusteringPage() {
     }
   }
 
+  // 🔥 新增：處理儲存編輯
+  const handleSaveEdit = async () => {
+    if (!editingCluster || !editLabel.trim()) return
+    const res = await aiApi.updateCluster(editingCluster.cluster_id, { 
+      topic_label: editLabel.trim(), 
+      is_locked: true 
+    })
+    if (res?.success) {
+      toast({ title: "更新成功", description: "分類標題已修改" })
+      setIsEditDialogOpen(false)
+      fetchClusters(selectedCourse) // 重新整理列表
+    } else {
+      toast({ title: "更新失敗", description: res?.message || "發生錯誤", variant: "destructive" })
+    }
+  }
+
+  // 🔥 新增：處理人工新增分類
+  const handleAddNewCluster = async () => {
+    if (!selectedCourse || !addLabel.trim()) return
+    const res = await aiApi.createCluster(selectedCourse, addLabel.trim())
+    if (res?.success) {
+      toast({ title: "新增成功", description: `已建立「${addLabel}」分類` })
+      setIsAddDialogOpen(false)
+      setAddLabel("") // 清空輸入框
+      fetchClusters(selectedCourse) // 重新整理列表
+    } else {
+      toast({ title: "新增失敗", description: res?.message || "發生錯誤", variant: "destructive" })
+    }
+  }
+
   // 圖表資料轉換
   const chartData = clusters.map(c => ({
     name: c.topic_label || `主題 ${c.cluster_id.substring(0, 4)}`,
@@ -102,14 +148,14 @@ export default function ClusteringPage() {
 
   return (
     <div className="p-8">
-      <div className="flex justify-between items-center mb-8">
+      <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-8 gap-4">
         <div>
           <h1 className="text-4xl font-bold text-foreground mb-2">AI 聚類分析</h1>
           <p className="text-muted-foreground">分析課程的熱門提問主題與難度分佈</p>
         </div>
         
-        <div className="flex gap-2 items-center">
-            {/* 7. 新增課程選擇下拉選單 */}
+        <div className="flex flex-wrap gap-2 items-center w-full md:w-auto">
+            {/* 課程選擇 */}
             <Select value={selectedCourse} onValueChange={setSelectedCourse}>
                 <SelectTrigger className="w-[200px]">
                     <SelectValue placeholder="選擇課程" />
@@ -121,7 +167,8 @@ export default function ClusteringPage() {
                 </SelectContent>
             </Select>
 
-            <div className="flex items-center gap-3 px-4 py-2 bg-secondary/20 rounded-md border mr-2">
+            {/* 分類上限滑桿 */}
+            <div className="flex items-center gap-3 px-4 py-2 bg-secondary/20 rounded-md border">
                 <Label className="text-sm whitespace-nowrap text-muted-foreground">
                     分類上限: <span className="font-bold text-foreground">{maxClusters}</span>
                 </Label>
@@ -143,6 +190,13 @@ export default function ClusteringPage() {
             >
                 <RefreshCw className={`w-4 h-4 ${isLoading ? 'animate-spin' : ''}`} />
             </Button>
+
+            {/* 🔥 新增：手動分類按鈕 */}
+            <Button variant="outline" onClick={() => setIsAddDialogOpen(true)} disabled={!selectedCourse}>
+              <Plus className="w-4 h-4 mr-2" />
+              新增分類
+            </Button>
+
             <Button onClick={handleRunClustering} disabled={isClustering || !selectedCourse} className="gap-2">
                 <Zap className={`w-4 h-4 ${isClustering ? 'animate-pulse' : ''}`} />
                 {isClustering ? "分析中..." : "重新運行 AI 分析"}
@@ -150,10 +204,8 @@ export default function ClusteringPage() {
         </div>
       </div>
 
-      {/* 以下內容保持不變，或根據您的需求顯示 */}
-      
-      {/* 摘要卡片 */}
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-8">
+      {/* 摘要卡片區 */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8">
         <Card>
           <CardContent className="pt-6">
             <p className="text-sm text-muted-foreground">聚類主題數</p>
@@ -186,8 +238,8 @@ export default function ClusteringPage() {
               <AlertCircle className="w-10 h-10 text-muted-foreground mb-4" />
               <h3 className="text-lg font-medium">尚無聚類資料</h3>
               <p className="text-muted-foreground mb-4 text-center max-w-md">
-                  目前此課程沒有已分析的聚類結果。可能是因為沒有提問，或者提問尚未進行分析。
-                  <br/>請嘗試點擊右上角的「重新運行 AI 分析」。
+                  目前此課程沒有已分析的聚類結果。
+                  <br/>您可以點擊「新增分類」手動建立，或點擊「重新運行 AI 分析」。
               </p>
           </div>
       )}
@@ -245,50 +297,100 @@ export default function ClusteringPage() {
                 key={cluster.cluster_id}
                 className="p-4 border rounded-lg hover:bg-secondary/50 transition-colors relative group"
                 >
-
-                <div className="absolute top-3 right-3 opacity-0 group-hover:opacity-100 transition-opacity">
+                    {/* 🔥 編輯按鈕：綁定事件 */}
+                    <div className="absolute top-3 right-3 opacity-0 group-hover:opacity-100 transition-opacity">
                         <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => {
-                            toast({ title: "功能開發中", description: `即將編輯: ${cluster.topic_label}` })
-                            // 這裡未來會連接到 setEditingCluster(cluster) 與 setIsEditOpen(true)
+                            setEditingCluster(cluster)
+                            setEditLabel(cluster.topic_label || "")
+                            setIsEditDialogOpen(true)
                         }}>
                             <Pencil className="w-4 h-4 text-muted-foreground" />
                         </Button>
                     </div>
 
-                <div className="flex justify-between items-start mb-2">
-                    <div>
-                    <h3 className="font-semibold text-lg">
-                        {cluster.topic_label || "未命名主題"}
-                    </h3>
-                    <p className="text-sm text-muted-foreground mt-1">
-                        包含 {cluster.question_count} 個提問
-                    </p>
+                    <div className="flex justify-between items-start mb-2">
+                        <div>
+                        <h3 className="font-semibold text-lg">
+                            {cluster.topic_label || "未命名主題"}
+                        </h3>
+                        <p className="text-sm text-muted-foreground mt-1">
+                            包含 {cluster.question_count} 個提問
+                        </p>
+                        </div>
+                        <div className="text-right">
+                        <div className="flex items-center gap-2 mb-1 justify-end">
+                            <span className="text-sm text-muted-foreground">平均難度</span>
+                            <span className={`text-sm font-bold ${
+                            cluster.avg_difficulty > 0.7 ? 'text-red-500' : 
+                            cluster.avg_difficulty > 0.4 ? 'text-yellow-600' : 'text-green-600'
+                            }`}>
+                            {cluster.avg_difficulty.toFixed(2)}
+                            </span>
+                        </div>
+                        </div>
                     </div>
-                    <div className="text-right">
-                    <div className="flex items-center gap-2 mb-1 justify-end">
-                        <span className="text-sm text-muted-foreground">平均難度</span>
-                        <span className={`text-sm font-bold ${
-                        cluster.avg_difficulty > 0.7 ? 'text-red-500' : 
-                        cluster.avg_difficulty > 0.4 ? 'text-yellow-600' : 'text-green-600'
-                        }`}>
-                        {cluster.avg_difficulty.toFixed(2)}
+                    {/* 關鍵字標籤 */}
+                    <div className="flex flex-wrap gap-2 mt-3">
+                        {cluster.top_keywords.map((keyword, idx) => (
+                        <span key={idx} className="text-xs bg-primary/10 text-primary px-2 py-1 rounded-full border border-primary/20">
+                            #{keyword}
                         </span>
+                        ))}
                     </div>
-                    </div>
-                </div>
-                {/* 關鍵字標籤 */}
-                <div className="flex flex-wrap gap-2 mt-3">
-                    {cluster.top_keywords.map((keyword, idx) => (
-                    <span key={idx} className="text-xs bg-primary/10 text-primary px-2 py-1 rounded-full border border-primary/20">
-                        #{keyword}
-                    </span>
-                    ))}
-                </div>
                 </div>
             ))}
             </CardContent>
         </Card>
       )}
+
+      {/* 🔥 新增：編輯分類 Dialog */}
+      <Dialog open={isEditDialogOpen} onOpenChange={setIsEditDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>修改分類名稱</DialogTitle>
+          </DialogHeader>
+          <div className="py-4">
+            <Label htmlFor="edit-name">分類名稱</Label>
+            <Input 
+              id="edit-name" 
+              value={editLabel} 
+              onChange={(e) => setEditLabel(e.target.value)} 
+              className="mt-2"
+            />
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setIsEditDialogOpen(false)}>取消</Button>
+            <Button onClick={handleSaveEdit}>儲存並鎖定</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* 🔥 新增：新增分類 Dialog */}
+      <Dialog open={isAddDialogOpen} onOpenChange={setIsAddDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>手動新增分類</DialogTitle>
+          </DialogHeader>
+          <div className="py-4">
+            <Label htmlFor="add-name">新分類名稱</Label>
+            <Input 
+              id="add-name" 
+              placeholder="例如：行政規定、作業繳交..."
+              value={addLabel} 
+              onChange={(e) => setAddLabel(e.target.value)} 
+              className="mt-2"
+            />
+            <p className="text-sm text-muted-foreground mt-2">
+              手動建立的分類將保留於系統中，下次執行 AI 聚類時，AI 將優先將相似問題歸入此分類。
+            </p>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setIsAddDialogOpen(false)}>取消</Button>
+            <Button onClick={handleAddNewCluster}>新增</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
     </div>
   )
 }

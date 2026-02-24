@@ -26,7 +26,6 @@ export const aiApi = {
    * @param courseId 課程 ID
    */
   getClusters: async (courseId: string): Promise<ClusterSummary[]> => {
-    // 🔥 新增：印出 Log 確認函式有被呼叫
     console.log(`[aiApi] 正在抓取課程 ${courseId} 的聚類資料...`); 
     
     try {
@@ -34,7 +33,6 @@ export const aiApi = {
         `/ai/clusters/${courseId}`
       );
       
-      // 🔥 新增：印出後端回傳的資料結構，方便確認
       console.log("[aiApi] 後端回應:", response.data);
 
       return (response.data as unknown as ClusterSummary[]) || [];
@@ -50,7 +48,6 @@ export const aiApi = {
    */
   runClustering: async (courseId: string, maxClusters: number = 5): Promise<boolean> => {
     try {
-      // 將參數帶入 API 請求
       await apiClient.post(`/ai/clusters/generate`, { 
         course_id: courseId, 
         max_clusters: maxClusters 
@@ -87,12 +84,36 @@ export const aiApi = {
       return null;
     }
   },
-  updateCluster: async (clusterId: string, data: { topic_label?: string; is_locked?: boolean }) => {
+
+  /**
+   * 更新單一聚類資訊
+   */
+  // 🔥 修正：加上 : Promise<APIResponse<any> | null> 來明確回傳型別
+  updateCluster: async (clusterId: string, data: { topic_label?: string; is_locked?: boolean }): Promise<APIResponse<any> | null> => {
     try {
       const response = await apiClient.patch(`/ai/clusters/${clusterId}`, data);
-      return response.data;
+      return response.data as APIResponse<any>;
     } catch (error) {
       console.error("Failed to update cluster:", error);
+      return null;
+    }
+  },
+
+  /**
+   * [新增] 人工手動建立空分類
+   * @param courseId 課程 ID
+   * @param topicLabel 分類標題
+   */
+  // 🔥 修正：加上 : Promise<APIResponse<any> | null> 來明確回傳型別
+  createCluster: async (courseId: string, topicLabel: string): Promise<APIResponse<any> | null> => {
+    try {
+      const response = await apiClient.post(`/ai/clusters/manual`, { 
+        course_id: courseId, 
+        topic_label: topicLabel 
+      });
+      return response.data as APIResponse<any>;
+    } catch (error) {
+      console.error("Failed to create cluster:", error);
       return null;
     }
   }

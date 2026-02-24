@@ -5,6 +5,7 @@ AI 層整合 API
 from fastapi import APIRouter, HTTPException, Query, BackgroundTasks
 from typing import List, Optional
 from bson import ObjectId
+from pydantic import BaseModel  # 🔥 新增這行引入 BaseModel
 from ..models.schemas import (
     AIAnalysisRequest, 
     AIAnalysisResult, 
@@ -415,6 +416,7 @@ async def get_clusters_summary(course_id: str):
         "data": clusters,
         "total_clusters": len(clusters)
     }
+
 # 示意：新增更新 Cluster 的 API
 @router.patch("/clusters/{cluster_id}")
 async def update_cluster(cluster_id: str, update_data: ClusterUpdate):
@@ -452,3 +454,46 @@ async def update_cluster(cluster_id: str, update_data: ClusterUpdate):
         return {"success": False, "message": "找不到該聚類主題"}
         
     return {"success": True, "message": "更新成功"}
+
+
+# 🔥 新增：人工手動建立聚類的模型與 API
+class ManualClusterCreate(BaseModel):
+    course_id: str
+    topic_label: str
+
+@router.post("/clusters/manual", summary="人工手動新增聚類主題")
+async def create_manual_cluster(request: ManualClusterCreate):
+    """
+    允許教師/助教手動建立全新的分類，將自動視為鎖定狀態
+    """
+    from ..database import db
+    from bson import ObjectId
+    from datetime import datetime
+    
+    database = db.get_db()
+    
+    # 檢查是否已有同名標籤
+    existing = await database["clusters"].find_one({
+        "course_id": request.course_id, 
+        "topic_label": request.topic_label
+    })
+    
+    if existing:
+        return {"success": False, "message": "該主題標籤已存在"}
+
+    new_cluster = {
+        "_id": ObjectId(),
+        "course_id": request.course_id,
+        "topic_label": request.topic_label,
+        "summary": "人工手動建立的主題",
+        "keywords": [],
+        "question_count": 0,
+        "avg_difficulty": 0.0,
+        "is_locked": True,          # 🔥 人工建立的預設鎖定，AI 不能亂改
+        "manual_label": request.topic_label,
+        "created_at": datetime.utcnow(),
+        "updated_at": datetime.utcnow()
+    }
+    
+    await database["clusters"].insert_one(new_cluster)
+    return {"success": True, "message": "建立成功"}
