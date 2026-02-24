@@ -13,7 +13,7 @@ import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
   ScatterChart, Scatter, ZAxis
 } from "recharts"
-import { Zap, RefreshCw, AlertCircle, Pencil, Plus } from "lucide-react" // 🔥 新增 Plus
+import { Zap, RefreshCw, AlertCircle, Pencil, Plus, Trash2 } from "lucide-react" // 🔥 新增 Plus
 import { Slider } from "@/components/ui/slider"
 import { Label } from "@/components/ui/label"
 import { Input } from "@/components/ui/input" // 🔥 新增 Input
@@ -44,6 +44,9 @@ export default function ClusteringPage() {
 
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false)
   const [addLabel, setAddLabel] = useState("")
+
+  const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false)
+  const [deletingCluster, setDeletingCluster] = useState<ClusterSummary | null>(null)
 
   // 初始載入：先抓課程
   useEffect(() => {
@@ -136,6 +139,19 @@ export default function ClusteringPage() {
       fetchClusters(selectedCourse) // 重新整理列表
     } else {
       toast({ title: "新增失敗", description: res?.message || "發生錯誤", variant: "destructive" })
+    }
+  }
+
+  // 🔥 新增：處理刪除分類
+  const handleDeleteCluster = async () => {
+    if (!deletingCluster) return
+    const res = await aiApi.deleteCluster(deletingCluster.cluster_id)
+    if (res?.success) {
+      toast({ title: "刪除成功", description: "分類已移除，內部問題已釋放" })
+      setIsDeleteDialogOpen(false)
+      fetchClusters(selectedCourse) // 重新整理列表
+    } else {
+      toast({ title: "刪除失敗", description: res?.message || "發生錯誤", variant: "destructive" })
     }
   }
 
@@ -297,14 +313,20 @@ export default function ClusteringPage() {
                 key={cluster.cluster_id}
                 className="p-4 border rounded-lg hover:bg-secondary/50 transition-colors relative group"
                 >
-                    {/* 🔥 編輯按鈕：綁定事件 */}
-                    <div className="absolute top-3 right-3 opacity-0 group-hover:opacity-100 transition-opacity">
+                    {/* 🔥 修改：右上角的編輯與刪除按鈕 */}
+                    <div className="absolute top-3 right-3 opacity-0 group-hover:opacity-100 transition-opacity flex gap-1">
                         <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => {
                             setEditingCluster(cluster)
                             setEditLabel(cluster.topic_label || "")
                             setIsEditDialogOpen(true)
                         }}>
                             <Pencil className="w-4 h-4 text-muted-foreground" />
+                        </Button>
+                        <Button variant="ghost" size="icon" className="h-8 w-8 hover:bg-destructive/10 hover:text-destructive" onClick={() => {
+                            setDeletingCluster(cluster)
+                            setIsDeleteDialogOpen(true)
+                        }}>
+                            <Trash2 className="w-4 h-4" />
                         </Button>
                     </div>
 
@@ -390,7 +412,25 @@ export default function ClusteringPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
-
+      
+      {/* 🔥 新增：刪除分類確認 Dialog */}
+      <Dialog open={isDeleteDialogOpen} onOpenChange={setIsDeleteDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle className="text-destructive">刪除分類確認</DialogTitle>
+          </DialogHeader>
+          <div className="py-4">
+            <p>確定要刪除「<strong>{deletingCluster?.topic_label}</strong>」這個分類嗎？</p>
+            <p className="text-sm text-muted-foreground mt-2">
+              刪除後，該分類內的 <strong>{deletingCluster?.question_count}</strong> 個提問將會被恢復成「未分類」狀態，下次執行 AI 聚類時將由 AI 重新分配。
+            </p>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setIsDeleteDialogOpen(false)}>取消</Button>
+            <Button variant="destructive" onClick={handleDeleteCluster}>確認刪除</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

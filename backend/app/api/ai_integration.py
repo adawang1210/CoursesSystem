@@ -326,97 +326,83 @@ async def generate_course_clusters(
 @router.get("/clusters/{course_id}", response_model=dict, summary="取得課程的所有聚類")
 async def get_clusters_summary(course_id: str):
     """
-    取得課程的所有 AI 聚類摘要
-    
-    返回每個聚類的：
-    - cluster_id
-    - 提問數量
-    - 平均難度
-    - 代表性關鍵字
+    取得課程的所有 AI 聚類摘要 (包含尚未有提問的空分類)
     """
     from ..database import db
     
     database = db.get_db()
-    collection = database["questions"]
 
-    # 1. 查詢條件：同時支援 String 與 ObjectId 格式的 course_id
+    # 1. 查詢條件
     match_condition = {
         "$or": [
             {"course_id": course_id},               
             {"course_id": ObjectId(course_id)}      
-        ],
-        "cluster_id": {"$ne": None}                 
+        ]
     }
     
+    # 🔥 關鍵修正 1：先從 clusters 表撈出所有分類的「底版」 (這樣空分類才會出現)
+    all_clusters_cursor = database["clusters"].find(match_condition)
+    all_clusters = await all_clusters_cursor.to_list(length=None)
+    
+    # 2. 依然去 questions 表做聚合，用來精準計算「各分類有幾題」跟「難度」
+    q_match = match_condition.copy()
+    q_match["cluster_id"] = {"$ne": None}
+    
     pipeline = [
-        {"$match": match_condition},
+        {"$match": q_match},
         {"$group": {
             "_id": "$cluster_id",
             "count": {"$sum": 1},
-            # 注意：如果資料庫沒有 difficulty_score 欄位，這裡會是 null
             "avg_difficulty": {"$avg": "$difficulty_score"},
-            # 🔥 修正 1：必須把關鍵字收集起來，下面的迴圈才讀得到
             "keywords": {"$push": "$keywords"} 
         }}
     ]
+    q_stats = await database["questions"].aggregate(pipeline).to_list(length=None)
     
-    results = await collection.aggregate(pipeline).to_list(length=None)
+    # 將聚合結果轉成字典方便查表: { "cluster_id_字串": 統計資料 }
+    stats_map = {str(stat["_id"]): stat for stat in q_stats}
 
-    clusters_collection = database["clusters"]
-    
-    clusters = []
-    for result in results:
-        # 2. 處理關鍵字：從 questions 聚合結果計算 Top 5
-        all_keywords = []
-        # 加上防呆，確保 keywords 存在且是列表
-        raw_keywords = result.get("keywords", [])
-        for kw_list in raw_keywords:
-            if isinstance(kw_list, list):
-                all_keywords.extend(kw_list)
+    # 3. 把資料組合起來回傳給前端
+    response_data = []
+    for cluster in all_clusters:
+        c_id_str = str(cluster["_id"])
+        stat = stats_map.get(c_id_str)
         
-        # 統計頻率
-        keyword_freq = {}
-        for kw in all_keywords:
-            if kw: # 排除空字串
-                keyword_freq[kw] = keyword_freq.get(kw, 0) + 1
-        
-        # 取前 5 個
-        top_keywords = sorted(
-            keyword_freq.items(),
-            key=lambda x: x[1],
-            reverse=True
-        )[:5]
-        
-        # 3. 取得 Cluster 詳細資訊 (Topic Label)
-        topic_label = "未命名主題"
-        try:
-            cluster_oid = ObjectId(result["_id"])
-            cluster_info = await clusters_collection.find_one({"_id": cluster_oid})
-            if cluster_info:
-                topic_label = cluster_info.get("topic_label", "未命名主題")
-        except:
-            pass # ID 格式錯誤或其他問題則忽略
+        if stat:
+            # 如果這個分類有提問，就動態計算 Top 5 關鍵字
+            all_keywords = []
+            for kw_list in stat.get("keywords", []):
+                if isinstance(kw_list, list):
+                    all_keywords.extend(kw_list)
             
-        # 🔥 修正 2：確保 avg_difficulty 絕對不是 None
-        # 如果是 None，則強制轉為 0，避免前端 toFixed 報錯
-        avg_diff = result.get("avg_difficulty")
-        if avg_diff is None:
-            avg_diff = 0.0
-
-        clusters.append({
-            "cluster_id": str(result["_id"]),
-            "topic_label": topic_label,
-            "question_count": result["count"],
-            "avg_difficulty": avg_diff, # 這裡傳出去的一定是數字
-            "top_keywords": [kw[0] for kw in top_keywords]
-        })
-    
+            keyword_freq = {}
+            for kw in all_keywords:
+                if kw: keyword_freq[kw] = keyword_freq.get(kw, 0) + 1
+            
+            top_keywords = [kw[0] for kw in sorted(keyword_freq.items(), key=lambda x: x[1], reverse=True)[:5]]
+            
+            response_data.append({
+                "cluster_id": c_id_str,
+                "topic_label": cluster.get("topic_label", "未命名主題"),
+                "question_count": stat["count"],
+                "avg_difficulty": stat.get("avg_difficulty") or 0.0,
+                "top_keywords": top_keywords
+            })
+        else:
+            # 🔥 關鍵修正 2：如果這個分類目前「沒有提問」(例如手動剛新增的空分類)
+            response_data.append({
+                "cluster_id": c_id_str,
+                "topic_label": cluster.get("topic_label", "未命名主題"),
+                "question_count": 0,
+                "avg_difficulty": 0.0,
+                "top_keywords": cluster.get("keywords", [])
+            })
+            
     return {
         "success": True,
-        "data": clusters,
-        "total_clusters": len(clusters)
+        "data": response_data,
+        "total_clusters": len(response_data)
     }
-
 # 示意：新增更新 Cluster 的 API
 @router.patch("/clusters/{cluster_id}")
 async def update_cluster(cluster_id: str, update_data: ClusterUpdate):
@@ -497,3 +483,33 @@ async def create_manual_cluster(request: ManualClusterCreate):
     
     await database["clusters"].insert_one(new_cluster)
     return {"success": True, "message": "建立成功"}
+
+@router.delete("/clusters/{cluster_id}", summary="刪除聚類主題")
+async def delete_cluster(cluster_id: str):
+    """
+    [新增] 刪除分類。
+    刪除後，原屬於此分類的提問將恢復為「未分類」狀態。
+    """
+    from ..database import db
+    from bson import ObjectId
+    
+    database = db.get_db()
+    
+    try:
+        oid = ObjectId(cluster_id)
+    except:
+        return {"success": False, "message": "無效的分類 ID"}
+
+    # 1. 把這個分類裡面的問題「釋放」出來 (把 cluster_id 設回 None)
+    await database["questions"].update_many(
+        {"cluster_id": cluster_id},  # 尋找屬於這個分類的問題
+        {"$set": {"cluster_id": None}} # 將它們設為未分類
+    )
+    
+    # 2. 刪除這個分類本身
+    result = await database["clusters"].delete_one({"_id": oid})
+    
+    if result.deleted_count == 0:
+        return {"success": False, "message": "找不到該分類"}
+        
+    return {"success": True, "message": "分類已刪除，內部提問已恢復未分類狀態"}

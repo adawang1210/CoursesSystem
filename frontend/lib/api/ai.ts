@@ -116,5 +116,21 @@ export const aiApi = {
       console.error("Failed to create cluster:", error);
       return null;
     }
+  },
+
+  // 在 createCluster 之後新增：
+  
+  /**
+   * [新增] 刪除分類
+   * @param clusterId 分類 ID
+   */
+  deleteCluster: async (clusterId: string): Promise<APIResponse<any> | null> => {
+    try {
+      const response = await apiClient.delete(`/ai/clusters/${clusterId}`);
+      return response.data as APIResponse<any>;
+    } catch (error) {
+      console.error("Failed to delete cluster:", error);
+      return null;
+    }
   }
-};
+}; // <-- 這是 aiApi 的結尾括號
