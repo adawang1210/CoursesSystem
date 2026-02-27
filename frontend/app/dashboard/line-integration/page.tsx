@@ -23,6 +23,7 @@ import {
   AlertCircle,
   Copy,
   CheckCircle2,
+  Link as LinkIcon, // 🔥 新增 icon
 } from "lucide-react";
 import {
   getLineConfig,
@@ -32,6 +33,8 @@ import {
   getLineMessages,
   getMessageStats,
   getLineUsers,
+  coursesApi, // 🔥 新增：引入課程 API
+  type Course, // 🔥 新增：引入課程型別
   type LineMessage as ApiLineMessage,
   type LineUser,
 } from "@/lib/api";
@@ -72,6 +75,7 @@ interface LineBot {
 export default function LineIntegrationPage() {
   const [messages, setMessages] = useState<LineMessage[]>([]);
   const [users, setUsers] = useState<LineUser[]>([]);
+  const [courses, setCourses] = useState<Course[]>([]); // 🔥 新增：課程列表狀態
   const [selectedUser, setSelectedUser] = useState<LineUser | null>(null);
   const [bot, setBot] = useState<LineBot>({
     channelId: "",
@@ -105,6 +109,7 @@ export default function LineIntegrationPage() {
     loadStats();
     loadUsers();
     loadMessageStats();
+    loadCourses(); // 🔥 新增：載入課程
   }, []);
 
   // 當選中使用者改變時，載入該使用者的訊息
@@ -176,6 +181,16 @@ export default function LineIntegrationPage() {
       }
     } catch (error) {
       console.error("載入 Webhook 資訊失敗:", error);
+    }
+  };
+
+  const loadCourses = async () => {
+    try {
+      const data = await coursesApi.getAll();
+      // 只顯示啟用中的課程
+      setCourses(data.filter((c) => c.is_active));
+    } catch (error) {
+      console.error("載入課程失敗:", error);
     }
   };
 
@@ -327,6 +342,14 @@ export default function LineIntegrationPage() {
       description: "Webhook URL 已複製到剪貼簿",
     });
     setTimeout(() => setCopied(false), 2000);
+  };
+
+  const handleCopyCode = (code: string) => {
+    navigator.clipboard.writeText(code);
+    toast({
+      title: "已複製",
+      description: `綁定指令「${code}」已複製`,
+    });
   };
 
   const handleSendMessage = () => {
@@ -574,6 +597,57 @@ export default function LineIntegrationPage() {
 
       {bot.isConnected && (
         <>
+          {/* 🔥 新增：課程綁定指引區塊 */}
+          <Card className="mb-8 border-primary/20 shadow-sm">
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <LinkIcon className="w-5 h-5 text-primary" />
+                課程綁定指引
+              </CardTitle>
+              <p className="text-sm text-muted-foreground">
+                請將以下「綁定指令」提供給學生。學生加入 LINE Bot 後輸入指令，即可將帳號與該課程連結。
+              </p>
+            </CardHeader>
+            <CardContent>
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                {courses.length > 0 ? (
+                  courses.map((course) => (
+                    <div
+                      key={course._id}
+                      className="p-4 border rounded-lg bg-card text-card-foreground shadow-sm hover:border-primary/50 transition-colors"
+                    >
+                      <div className="mb-3">
+                        <h3 className="font-semibold text-lg">{course.course_name}</h3>
+                        <p className="text-xs text-muted-foreground">
+                          {course.semester} • {course.course_code}
+                        </p>
+                      </div>
+                      <div className="flex items-center gap-2 bg-secondary/50 p-2 rounded border border-border/50">
+                        <code className="text-sm font-mono flex-1 text-primary truncate">
+                          綁定 {course._id}
+                        </code>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-8 w-8 hover:bg-white hover:text-green-600"
+                          onClick={() => handleCopyCode(`綁定 ${course._id}`)}
+                          title="複製指令"
+                        >
+                          <Copy className="w-4 h-4" />
+                        </Button>
+                      </div>
+                    </div>
+                  ))
+                ) : (
+                  <div className="col-span-full text-center py-6 text-muted-foreground bg-secondary/20 rounded-lg">
+                    <p>目前沒有啟用中的課程</p>
+                    <p className="text-xs mt-1">請先至課程管理頁面新增課程</p>
+                  </div>
+                )}
+              </div>
+            </CardContent>
+          </Card>
+
           {/* Message Statistics */}
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
             <Card>

@@ -92,7 +92,7 @@ export const aiApi = {
   updateCluster: async (clusterId: string, data: { topic_label?: string; is_locked?: boolean }): Promise<APIResponse<any> | null> => {
     try {
       const response = await apiClient.patch(`/ai/clusters/${clusterId}`, data);
-      return response.data as APIResponse<any>;
+      return response as APIResponse<any>;
     } catch (error) {
       console.error("Failed to update cluster:", error);
       return null;
@@ -111,7 +111,7 @@ export const aiApi = {
         course_id: courseId, 
         topic_label: topicLabel 
       });
-      return response.data as APIResponse<any>;
+      return response as APIResponse<any>;
     } catch (error) {
       console.error("Failed to create cluster:", error);
       return null;
@@ -127,7 +127,7 @@ export const aiApi = {
   deleteCluster: async (clusterId: string): Promise<APIResponse<any> | null> => {
     try {
       const response = await apiClient.delete(`/ai/clusters/${clusterId}`);
-      return response.data as APIResponse<any>;
+      return response as APIResponse<any>;
     } catch (error) {
       console.error("Failed to delete cluster:", error);
       return null;

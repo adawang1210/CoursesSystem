@@ -140,6 +140,8 @@ class QuestionBase(BaseModel):
     
     # 元資料
     original_message_id: Optional[str] = Field(None, description="Line 訊息ID")
+    # 🔥 新增：來源標記 (預設 WEB)
+    source: str = Field(default="WEB", description="提問來源 (WEB, LINE)")
 
 
 class QuestionCreate(BaseModel):
@@ -293,12 +295,15 @@ class AIAnalysisRequest(BaseModel):
 class AIAnalysisResult(BaseModel):
     """AI 分析結果"""
     question_id: str = Field(..., description="提問ID")
-    cluster_id: str = Field(..., description="聚類ID")
+    # 🔥 修改：cluster_id 改為 Optional，因新提問尚未分群
+    cluster_id: Optional[str] = Field(None, description="聚類ID")
     difficulty_score: float = Field(..., description="難度分數")
     keywords: List[str] = Field(default_factory=list, description="關鍵字")
     response_draft: Optional[str] = Field(None, description="AI 生成的回覆草稿")
     summary: Optional[str] = Field(None, description="問題摘要")
     suggested_tags: List[str] = Field(default_factory=list, description="建議標籤")
+    # 🔥 新增：情緒分數欄位
+    sentiment_score: Optional[float] = Field(None, description="情緒分數")
 
 
 # ==================== 統計報表相關模型 ====================

@@ -112,44 +112,87 @@ export default function ClusteringPage() {
     }
   }
 
-  // 🔥 新增：處理儲存編輯
+  // 🔥 修正：處理儲存編輯 (加入樂觀更新)
   const handleSaveEdit = async () => {
     if (!editingCluster || !editLabel.trim()) return
-    const res = await aiApi.updateCluster(editingCluster.cluster_id, { 
-      topic_label: editLabel.trim(), 
+    
+    const targetId = editingCluster.cluster_id
+    const newLabel = editLabel.trim()
+
+    const res = await aiApi.updateCluster(targetId, { 
+      topic_label: newLabel, 
       is_locked: true 
     })
+    
     if (res?.success) {
       toast({ title: "更新成功", description: "分類標題已修改" })
       setIsEditDialogOpen(false)
-      fetchClusters(selectedCourse) // 重新整理列表
+      
+      // 🔥 關鍵修正：樂觀更新！直接在畫面上把該卡片的名稱換掉，瞬間更新
+      setClusters(prevClusters => 
+        prevClusters.map(c => 
+          c.cluster_id === targetId 
+            ? { ...c, topic_label: newLabel } 
+            : c
+        )
+      )
+      
+      setEditingCluster(null)
     } else {
       toast({ title: "更新失敗", description: res?.message || "發生錯誤", variant: "destructive" })
     }
   }
 
-  // 🔥 新增：處理人工新增分類
+  // 🔥 修正：處理人工新增分類 (加入樂觀更新)
   const handleAddNewCluster = async () => {
     if (!selectedCourse || !addLabel.trim()) return
-    const res = await aiApi.createCluster(selectedCourse, addLabel.trim())
+    
+    // 先把輸入的標籤存起來，因為後面 state 會被清空
+    const newLabel = addLabel.trim()
+
+    const res = await aiApi.createCluster(selectedCourse, newLabel)
     if (res?.success) {
-      toast({ title: "新增成功", description: `已建立「${addLabel}」分類` })
+      toast({ title: "新增成功", description: `已建立「${newLabel}」分類` })
       setIsAddDialogOpen(false)
       setAddLabel("") // 清空輸入框
-      fetchClusters(selectedCourse) // 重新整理列表
+      
+      // 🔥 關鍵修正：樂觀更新！手動在畫面上塞入一個「暫時的」空分類卡片
+      setClusters(prevClusters => [
+        ...prevClusters,
+        {
+          cluster_id: `temp-${Date.now()}`, // 給一個暫時的 ID 避免 React 渲染報錯
+          topic_label: newLabel,
+          question_count: 0,
+          avg_difficulty: 0,
+          top_keywords: []
+        }
+      ])
+
+      // 在背景偷偷重新抓取真正的資料 (為了拿到資料庫產生的真實 cluster_id)
+      // 這樣使用者如果馬上想刪除或編輯這個新分類，才不會因為 ID 錯誤而失敗
+      fetchClusters(selectedCourse) 
     } else {
       toast({ title: "新增失敗", description: res?.message || "發生錯誤", variant: "destructive" })
     }
   }
 
-  // 🔥 新增：處理刪除分類
+  // 🔥 修正：處理刪除分類 (加入樂觀更新)
   const handleDeleteCluster = async () => {
     if (!deletingCluster) return
-    const res = await aiApi.deleteCluster(deletingCluster.cluster_id)
+    
+    // 先把要刪除的 ID 存起來
+    const targetId = deletingCluster.cluster_id;
+    
+    const res = await aiApi.deleteCluster(targetId)
     if (res?.success) {
       toast({ title: "刪除成功", description: "分類已移除，內部問題已釋放" })
       setIsDeleteDialogOpen(false)
-      fetchClusters(selectedCourse) // 重新整理列表
+      
+      // 🔥 關鍵修正：手動將該分類從 React 狀態中濾除 (畫面瞬間消失)
+      setClusters(prevClusters => prevClusters.filter(c => c.cluster_id !== targetId))
+      
+      // 清空選中的目標
+      setDeletingCluster(null)
     } else {
       toast({ title: "刪除失敗", description: res?.message || "發生錯誤", variant: "destructive" })
     }

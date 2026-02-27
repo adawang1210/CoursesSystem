@@ -25,17 +25,6 @@ class QuestionService:
     async def create_question(self, question_data: QuestionCreate, background_tasks: Optional[BackgroundTasks] = None) -> Dict[str, Any]:
         """
         建立新提問 (從 Line Bot 接收)
-        
-        重要：此方法會自動進行去識別化處理
-        
-        Args:
-            question_data: 提問資料 (包含 line_user_id)
-        
-        Returns:
-            建立的提問文件
-        
-        Raises:
-            ValueError: 當課程不存在時
         """
         # 驗證課程是否存在
         course = await course_service.get_course(question_data.course_id)
@@ -55,8 +44,8 @@ class QuestionService:
         # 建立提問文件 (不包含原始 line_user_id)
         question_doc = {
             "course_id": question_data.course_id,
-            "class_id": question_data.class_id,
-            "pseudonym": pseudonym,  # 使用去識別化代號
+            "class_id": getattr(question_data, 'class_id', None), # 容錯處理
+            "pseudonym": pseudonym,  
             "question_text": question_data.question_text,
             "status": QuestionStatus.PENDING,
             "cluster_id": None,
@@ -65,7 +54,8 @@ class QuestionService:
             "keywords": [],
             "merged_to_qa_id": None,
             "is_merged": False,
-            "original_message_id": question_data.original_message_id,
+            "source": "LINE",  # 🔥 新增：標記這題來自 LINE Bot
+            "original_message_id": getattr(question_data, 'original_message_id', None),
             "created_at": datetime.utcnow(),
             "updated_at": datetime.utcnow()
         }
@@ -87,16 +77,14 @@ class QuestionService:
         try:
             print(f"🤖 開始 AI 分析提問: {question_id}")
             
+            # 🔥 修正：移除 await，因為 ai_service 內部是同步呼叫 API 的
             # 1. 執行深度分析 (關鍵字、難度、摘要)
-            analysis_data = await ai_service.analyze_question(question_text)
+            analysis_data = ai_service.analyze_question(question_text)
             
             # 2. 生成回答草稿
-            draft = await ai_service.generate_response_draft(question_text)
+            draft = ai_service.generate_response_draft(question_text)
             
-            # 3. 組合結果 (符合 AIAnalysisResult 格式)
-            # 注意：這裡直接構造字典或物件傳給 update_ai_analysis
-            # 為了方便，我們直接操作 DB 或構造 Pydantic 物件
-            
+            # 3. 組合結果
             analysis_result = AIAnalysisResult(
                 question_id=question_id,
                 difficulty_score=analysis_data.get("difficulty_score", 0.5),
@@ -112,6 +100,8 @@ class QuestionService:
             
         except Exception as e:
             print(f"❌ AI 背景任務失敗: {str(e)}")
+            import traceback
+            traceback.print_exc()
 
     async def get_question(self, question_id: str) -> Optional[Dict[str, Any]]:
         """取得單一提問"""
