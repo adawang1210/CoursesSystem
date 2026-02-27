@@ -2,13 +2,19 @@ import { apiClient } from "@/lib/api-client";
 
 // ==================== 資料型別定義 ====================
 
-// 對應後端回傳的聚類摘要格式
+// 🔥 修正：完美對齊後端 schemas.py 中的 Cluster 模型
 export interface ClusterSummary {
-  cluster_id: string;
-  topic_label?: string; 
-  question_count: number;
-  avg_difficulty: number;
-  top_keywords: string[];
+  _id?: string;               // MongoDB 的 ID
+  course_id: string;          // 課程 ID
+  topic_label: string;        // AI 生成的主題標籤
+  summary?: string;           // 🔥 新增：該主題的綜合摘要 (AI 生成的解釋)
+  keywords: string[];         // 🔥 修正：對應後端的 keywords (原為 top_keywords)
+  question_count: number;     // 包含的問題數量
+  avg_difficulty: number;     // 平均難度
+  is_locked?: boolean;        // 🔥 新增：是否已被人工鎖定
+  manual_label?: string;      // 🔥 新增：人工手動設定的標籤名稱
+  created_at?: string;
+  updated_at?: string;
 }
 
 // 通用回應格式
@@ -88,7 +94,6 @@ export const aiApi = {
   /**
    * 更新單一聚類資訊
    */
-  // 🔥 修正：加上 : Promise<APIResponse<any> | null> 來明確回傳型別
   updateCluster: async (clusterId: string, data: { topic_label?: string; is_locked?: boolean }): Promise<APIResponse<any> | null> => {
     try {
       const response = await apiClient.patch(`/ai/clusters/${clusterId}`, data);
@@ -104,7 +109,6 @@ export const aiApi = {
    * @param courseId 課程 ID
    * @param topicLabel 分類標題
    */
-  // 🔥 修正：加上 : Promise<APIResponse<any> | null> 來明確回傳型別
   createCluster: async (courseId: string, topicLabel: string): Promise<APIResponse<any> | null> => {
     try {
       const response = await apiClient.post(`/ai/clusters/manual`, { 
@@ -117,8 +121,6 @@ export const aiApi = {
       return null;
     }
   },
-
-  // 在 createCluster 之後新增：
   
   /**
    * [新增] 刪除分類
@@ -133,4 +135,4 @@ export const aiApi = {
       return null;
     }
   }
-}; // <-- 這是 aiApi 的結尾括號
+};

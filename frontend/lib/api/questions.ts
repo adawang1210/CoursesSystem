@@ -11,14 +11,26 @@ export interface Question {
   pseudonym: string;
   question_text: string;
   status: "PENDING" | "APPROVED" | "REJECTED" | "DELETED" | "WITHDRAWN";
+  
+  // ==========================================
+  // 🔥 修正：將 AI 欄位攤平，並補齊後端的所有新欄位
+  // ==========================================
   cluster_id?: string;
-  ai_analysis?: {
-    difficulty_score?: number;
-    difficulty_level?: "EASY" | "MEDIUM" | "HARD" | "VERY_HARD";
-    keywords?: string[];
-    analyzed_at?: string;
-  };
+  difficulty_score?: number;
+  difficulty_level?: "easy" | "medium" | "hard" | "EASY" | "MEDIUM" | "HARD";
+  keywords?: string[];
+  ai_response_draft?: string;  // AI 生成的回覆草稿
+  ai_summary?: string;         // AI 對問題的摘要
+  sentiment_score?: number;    // 情緒分數
+  
+  // ==========================================
+  // 其他系統狀態與元資料
+  // ==========================================
+  source?: string;             // 來源 (例如: "LINE" 或 "WEB")
+  original_message_id?: string;// LINE 原始訊息 ID
+  
   merged_to_qa_id?: string;
+  is_merged?: boolean;
   created_at?: string;
   updated_at?: string;
 }

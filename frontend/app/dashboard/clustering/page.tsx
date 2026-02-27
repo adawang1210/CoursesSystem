@@ -13,17 +13,17 @@ import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
   ScatterChart, Scatter, ZAxis
 } from "recharts"
-import { Zap, RefreshCw, AlertCircle, Pencil, Plus, Trash2 } from "lucide-react" // 🔥 新增 Plus
+import { Zap, RefreshCw, AlertCircle, Pencil, Plus, Trash2, Sparkles, Lock } from "lucide-react" 
 import { Slider } from "@/components/ui/slider"
 import { Label } from "@/components/ui/label"
-import { Input } from "@/components/ui/input" // 🔥 新增 Input
+import { Input } from "@/components/ui/input" 
 import {
   Dialog,
   DialogContent,
   DialogHeader,
   DialogTitle,
   DialogFooter,
-} from "@/components/ui/dialog" // 🔥 新增 Dialog 相關組件
+} from "@/components/ui/dialog"
 import { aiApi, type ClusterSummary } from "@/lib/api/ai"
 import { coursesApi, type Course } from "@/lib/api"
 import { useToast } from "@/hooks/use-toast"
@@ -37,7 +37,6 @@ export default function ClusteringPage() {
   const { toast } = useToast()
   const [maxClusters, setMaxClusters] = useState<number>(5)
 
-  // 🔥 新增：編輯/新增 Dialog 的狀態
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false)
   const [editingCluster, setEditingCluster] = useState<ClusterSummary | null>(null)
   const [editLabel, setEditLabel] = useState("")
@@ -48,12 +47,10 @@ export default function ClusteringPage() {
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false)
   const [deletingCluster, setDeletingCluster] = useState<ClusterSummary | null>(null)
 
-  // 初始載入：先抓課程
   useEffect(() => {
     loadCourses()
   }, [])
 
-  // 當課程改變時，抓取該課程的聚類資料
   useEffect(() => {
     if (selectedCourse) {
       fetchClusters(selectedCourse)
@@ -65,7 +62,6 @@ export default function ClusteringPage() {
       const data = await coursesApi.getAll()
       setCourses(data)
       if (data.length > 0) {
-        // 預設選中第一個課程
         setSelectedCourse(data[0]._id || "")
       }
     } catch (error) {
@@ -99,7 +95,6 @@ export default function ClusteringPage() {
       const success = await aiApi.runClustering(selectedCourse, maxClusters)
       if (success) {
         toast({ title: "分析完成", description: "已更新聚類結果" })
-        // 稍等一下再重新抓取，確保 DB 寫入完成
         setTimeout(() => fetchClusters(selectedCourse), 1000)
       } else {
         toast({ title: "分析失敗", description: "後端未回傳成功訊號", variant: "destructive" })
@@ -112,11 +107,10 @@ export default function ClusteringPage() {
     }
   }
 
-  // 🔥 修正：處理儲存編輯 (加入樂觀更新)
   const handleSaveEdit = async () => {
-    if (!editingCluster || !editLabel.trim()) return
+    if (!editingCluster || !editingCluster._id || !editLabel.trim()) return
     
-    const targetId = editingCluster.cluster_id
+    const targetId = editingCluster._id // 🔥 修正為 _id
     const newLabel = editLabel.trim()
 
     const res = await aiApi.updateCluster(targetId, { 
@@ -128,11 +122,10 @@ export default function ClusteringPage() {
       toast({ title: "更新成功", description: "分類標題已修改" })
       setIsEditDialogOpen(false)
       
-      // 🔥 關鍵修正：樂觀更新！直接在畫面上把該卡片的名稱換掉，瞬間更新
       setClusters(prevClusters => 
         prevClusters.map(c => 
-          c.cluster_id === targetId 
-            ? { ...c, topic_label: newLabel } 
+          c._id === targetId // 🔥 修正為 _id
+            ? { ...c, topic_label: newLabel, is_locked: true } 
             : c
         )
       )
@@ -143,64 +136,55 @@ export default function ClusteringPage() {
     }
   }
 
-  // 🔥 修正：處理人工新增分類 (加入樂觀更新)
   const handleAddNewCluster = async () => {
     if (!selectedCourse || !addLabel.trim()) return
     
-    // 先把輸入的標籤存起來，因為後面 state 會被清空
     const newLabel = addLabel.trim()
 
     const res = await aiApi.createCluster(selectedCourse, newLabel)
     if (res?.success) {
       toast({ title: "新增成功", description: `已建立「${newLabel}」分類` })
       setIsAddDialogOpen(false)
-      setAddLabel("") // 清空輸入框
+      setAddLabel("") 
       
-      // 🔥 關鍵修正：樂觀更新！手動在畫面上塞入一個「暫時的」空分類卡片
       setClusters(prevClusters => [
         ...prevClusters,
         {
-          cluster_id: `temp-${Date.now()}`, // 給一個暫時的 ID 避免 React 渲染報錯
+          _id: `temp-${Date.now()}`, // 🔥 修正為 _id
+          course_id: selectedCourse,
           topic_label: newLabel,
           question_count: 0,
           avg_difficulty: 0,
-          top_keywords: []
+          keywords: [] 
         }
       ])
 
-      // 在背景偷偷重新抓取真正的資料 (為了拿到資料庫產生的真實 cluster_id)
-      // 這樣使用者如果馬上想刪除或編輯這個新分類，才不會因為 ID 錯誤而失敗
       fetchClusters(selectedCourse) 
     } else {
       toast({ title: "新增失敗", description: res?.message || "發生錯誤", variant: "destructive" })
     }
   }
 
-  // 🔥 修正：處理刪除分類 (加入樂觀更新)
   const handleDeleteCluster = async () => {
-    if (!deletingCluster) return
+    if (!deletingCluster || !deletingCluster._id) return
     
-    // 先把要刪除的 ID 存起來
-    const targetId = deletingCluster.cluster_id;
+    const targetId = deletingCluster._id; // 🔥 修正為 _id
     
     const res = await aiApi.deleteCluster(targetId)
     if (res?.success) {
       toast({ title: "刪除成功", description: "分類已移除，內部問題已釋放" })
       setIsDeleteDialogOpen(false)
       
-      // 🔥 關鍵修正：手動將該分類從 React 狀態中濾除 (畫面瞬間消失)
-      setClusters(prevClusters => prevClusters.filter(c => c.cluster_id !== targetId))
+      setClusters(prevClusters => prevClusters.filter(c => c._id !== targetId)) // 🔥 修正為 _id
       
-      // 清空選中的目標
       setDeletingCluster(null)
     } else {
       toast({ title: "刪除失敗", description: res?.message || "發生錯誤", variant: "destructive" })
     }
   }
 
-  // 圖表資料轉換
   const chartData = clusters.map(c => ({
-    name: c.topic_label || `主題 ${c.cluster_id.substring(0, 4)}`,
+    name: c.topic_label || `主題 ${c._id?.substring(0, 4)}`, // 🔥 修正為 _id
     questions: c.question_count,
     difficulty: Number((c.avg_difficulty || 0).toFixed(2)),
   }))
@@ -214,7 +198,6 @@ export default function ClusteringPage() {
         </div>
         
         <div className="flex flex-wrap gap-2 items-center w-full md:w-auto">
-            {/* 課程選擇 */}
             <Select value={selectedCourse} onValueChange={setSelectedCourse}>
                 <SelectTrigger className="w-[200px]">
                     <SelectValue placeholder="選擇課程" />
@@ -226,7 +209,6 @@ export default function ClusteringPage() {
                 </SelectContent>
             </Select>
 
-            {/* 分類上限滑桿 */}
             <div className="flex items-center gap-3 px-4 py-2 bg-secondary/20 rounded-md border">
                 <Label className="text-sm whitespace-nowrap text-muted-foreground">
                     分類上限: <span className="font-bold text-foreground">{maxClusters}</span>
@@ -250,7 +232,6 @@ export default function ClusteringPage() {
                 <RefreshCw className={`w-4 h-4 ${isLoading ? 'animate-spin' : ''}`} />
             </Button>
 
-            {/* 🔥 新增：手動分類按鈕 */}
             <Button variant="outline" onClick={() => setIsAddDialogOpen(true)} disabled={!selectedCourse}>
               <Plus className="w-4 h-4 mr-2" />
               新增分類
@@ -263,7 +244,6 @@ export default function ClusteringPage() {
         </div>
       </div>
 
-      {/* 摘要卡片區 */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8">
         <Card>
           <CardContent className="pt-6">
@@ -291,7 +271,6 @@ export default function ClusteringPage() {
         </Card>
       </div>
 
-      {/* 若無資料顯示提示 */}
       {clusters.length === 0 && !isLoading && (
           <div className="flex flex-col items-center justify-center p-12 border-2 border-dashed rounded-lg bg-secondary/20 mb-8">
               <AlertCircle className="w-10 h-10 text-muted-foreground mb-4" />
@@ -303,7 +282,6 @@ export default function ClusteringPage() {
           </div>
       )}
 
-      {/* 圖表區 (有資料才顯示) */}
       {clusters.length > 0 && (
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
             <Card>
@@ -344,19 +322,18 @@ export default function ClusteringPage() {
         </div>
       )}
 
-      {/* 主題詳情列表 */}
       {clusters.length > 0 && (
         <Card>
             <CardHeader>
             <CardTitle>主題詳情列表</CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">
-            {clusters.map((cluster) => (
+            {clusters.map((cluster, index) => (
                 <div
-                key={cluster.cluster_id}
+                // 🔥 加上萬用備案：不管後端傳哪種 ID 名稱都抓得到，最糟的情況下使用 index
+                key={cluster._id || (cluster as any).id || (cluster as any).cluster_id || `cluster-${index}`}
                 className="p-4 border rounded-lg hover:bg-secondary/50 transition-colors relative group"
                 >
-                    {/* 🔥 修改：右上角的編輯與刪除按鈕 */}
                     <div className="absolute top-3 right-3 opacity-0 group-hover:opacity-100 transition-opacity flex gap-1">
                         <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => {
                             setEditingCluster(cluster)
@@ -375,8 +352,13 @@ export default function ClusteringPage() {
 
                     <div className="flex justify-between items-start mb-2">
                         <div>
-                        <h3 className="font-semibold text-lg">
-                            {cluster.topic_label || "未命名主題"}
+                        <h3 className="font-semibold text-lg flex items-center gap-2">
+                          {cluster.topic_label || "未命名主題"}
+                          {cluster.is_locked && (
+                              <span title="已人工鎖定，AI重新聚類時不會被覆寫" className="flex items-center">
+                                 <Lock className="w-4 h-4 text-muted-foreground" />
+                              </span>
+                          )}
                         </h3>
                         <p className="text-sm text-muted-foreground mt-1">
                             包含 {cluster.question_count} 個提問
@@ -394,9 +376,16 @@ export default function ClusteringPage() {
                         </div>
                         </div>
                     </div>
-                    {/* 關鍵字標籤 */}
+                    
+                    {cluster.summary && (
+                      <p className="text-sm text-muted-foreground mt-3 mb-2 p-3 bg-secondary/30 rounded-md border border-border/50">
+                        <Sparkles className="w-3 h-3 inline mr-1 text-indigo-500" />
+                        {cluster.summary}
+                      </p>
+                    )}
+
                     <div className="flex flex-wrap gap-2 mt-3">
-                        {cluster.top_keywords.map((keyword, idx) => (
+                        {cluster.keywords?.map((keyword, idx) => (
                         <span key={idx} className="text-xs bg-primary/10 text-primary px-2 py-1 rounded-full border border-primary/20">
                             #{keyword}
                         </span>
@@ -408,7 +397,6 @@ export default function ClusteringPage() {
         </Card>
       )}
 
-      {/* 🔥 新增：編輯分類 Dialog */}
       <Dialog open={isEditDialogOpen} onOpenChange={setIsEditDialogOpen}>
         <DialogContent>
           <DialogHeader>
@@ -430,7 +418,6 @@ export default function ClusteringPage() {
         </DialogContent>
       </Dialog>
 
-      {/* 🔥 新增：新增分類 Dialog */}
       <Dialog open={isAddDialogOpen} onOpenChange={setIsAddDialogOpen}>
         <DialogContent>
           <DialogHeader>
@@ -456,7 +443,6 @@ export default function ClusteringPage() {
         </DialogContent>
       </Dialog>
       
-      {/* 🔥 新增：刪除分類確認 Dialog */}
       <Dialog open={isDeleteDialogOpen} onOpenChange={setIsDeleteDialogOpen}>
         <DialogContent>
           <DialogHeader>

@@ -12,7 +12,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-// 🔥 新增 Dialog 相關元件與 Textarea
 import {
   Dialog,
   DialogContent,
@@ -24,8 +23,8 @@ import {
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { 
-  Search, RefreshCw, CheckCircle, XCircle, Trash2, 
-  Bot, Sparkles, Copy, FileText // 🔥 新增 icon
+  RefreshCw, CheckCircle, XCircle, Trash2, 
+  Bot, Sparkles, Copy, FileText, MessageCircle, Clock, CheckSquare, XSquare
 } from "lucide-react";
 import {
   questionsApi,
@@ -33,7 +32,6 @@ import {
   type Question as ApiQuestion,
   type Course,
 } from "@/lib/api";
-// 🔥 引入 aiApi
 import { aiApi } from "@/lib/api/ai"; 
 import { useToast } from "@/hooks/use-toast";
 
@@ -48,7 +46,6 @@ interface DisplayQuestion {
   date: string;
   clusterId?: string;
   keywords?: string[];
-  // 🔥 新增 AI 欄位
   aiResponseDraft?: string;
   aiSummary?: string;
 }
@@ -61,7 +58,7 @@ export default function QuestionsPage() {
   const [selectedCourse, setSelectedCourse] = useState<string>("all");
   const [loading, setLoading] = useState(true);
   
-  // 🔥 新增：控制 AI 輔助視窗的狀態
+  // AI 輔助視窗狀態
   const [isAiModalOpen, setIsAiModalOpen] = useState(false);
   const [selectedQuestion, setSelectedQuestion] = useState<DisplayQuestion | null>(null);
   const [draftContent, setDraftContent] = useState("");
@@ -69,24 +66,20 @@ export default function QuestionsPage() {
 
   const { toast } = useToast();
 
-  // 1. 頁面初始化：只載入課程
   useEffect(() => {
     loadCourses();
   }, []);
 
-  // 2. 當「課程列表」載入完成，或是「篩選條件」改變時，才去載入問題
   useEffect(() => {
-    // 只有當課程列表有資料時，才去抓問題，這樣才能正確對應課程名稱
     if (courses.length > 0) {
       loadQuestions();
     }
   }, [courses, selectedCourse, selectedStatus]); 
-  // ↑ 將 courses 加入依賴陣列，確保它是最新的
 
   const loadCourses = async () => {
     try {
-      const courses = await coursesApi.getAll();
-      setCourses(courses);
+      const coursesData = await coursesApi.getAll();
+      setCourses(coursesData);
     } catch (error) {
       console.error("載入課程失敗:", error);
     }
@@ -97,38 +90,30 @@ export default function QuestionsPage() {
       setLoading(true);
       const params: any = {};
       if (selectedCourse !== "all") params.course_id = selectedCourse;
-      if (selectedStatus !== "all")
-        params.status = selectedStatus.toUpperCase();
+      if (selectedStatus !== "all") params.status = selectedStatus.toUpperCase();
 
-      const questions = await questionsApi.getAll(params);
-      const filteredData = questions.filter(
+      const questionsData = await questionsApi.getAll(params);
+      const filteredData = questionsData.filter(
         (q: ApiQuestion) => q.status !== "DELETED"
       );
 
-      const mappedQuestions: DisplayQuestion[] = filteredData.map(
-        (q: any) => { // 暫時用 any 避免型別與後端不一致
+      const mappedQuestions: DisplayQuestion[] = filteredData.map((q: any) => { 
           const course = courses.find((c) => c._id === q.course_id);
-          // 🔥 修正資料映射：對應後端 schemas.py 的欄位
           return {
             id: q._id || "",
             courseId: q.course_id,
             courseName: course?.course_name || "未知課程",
             content: q.question_text,
-            pseudonym: q.pseudonym.substring(0, 8) + "...",
+            pseudonym: q.pseudonym ? q.pseudonym.substring(0, 8) + "..." : "匿名",
             status: q.status,
-            // 注意：後端 QuestionBase 直接包含這些欄位
             difficulty: q.difficulty_level, 
-            date: q.created_at
-              ? new Date(q.created_at).toISOString().split("T")[0]
-              : "",
+            date: q.created_at ? new Date(q.created_at).toISOString().split("T")[0] : "",
             clusterId: q.cluster_id,
             keywords: q.keywords || [],
-            // 🔥 對應新的 AI 欄位
             aiResponseDraft: q.ai_response_draft,
             aiSummary: q.ai_summary
           };
-        }
-      );
+      });
       setQuestions(mappedQuestions);
     } catch (error) {
       console.error("載入提問失敗:", error);
@@ -138,9 +123,28 @@ export default function QuestionsPage() {
     }
   };
 
-  // ... (handleApprove, handleReject, handleDelete 保持不變) ...
-  const handleApprove = async (id: string) => { /* ...原程式碼... */ };
-  const handleReject = async (id: string) => { /* ...原程式碼... */ };
+  // 🔥 補齊：完整實作批准邏輯
+  const handleApprove = async (id: string) => { 
+    try {
+      await questionsApi.updateStatus(id, { status: "APPROVED" });
+      toast({ title: "成功", description: "提問已批准" });
+      setQuestions(questions.map((q) => q.id === id ? { ...q, status: "APPROVED" } : q));
+    } catch (error) {
+      toast({ title: "錯誤", description: "更新失敗", variant: "destructive" });
+    }
+  };
+
+  // 🔥 補齊：完整實作拒絕邏輯
+  const handleReject = async (id: string) => { 
+    try {
+      await questionsApi.updateStatus(id, { status: "REJECTED" });
+      toast({ title: "成功", description: "提問已拒絕" });
+      setQuestions(questions.map((q) => q.id === id ? { ...q, status: "REJECTED" } : q));
+    } catch (error) {
+      toast({ title: "錯誤", description: "更新失敗", variant: "destructive" });
+    }
+  };
+
   const handleDelete = async (id: string) => { 
     try {
       await questionsApi.delete(id);
@@ -151,57 +155,43 @@ export default function QuestionsPage() {
     }
   };
 
-  // 🔥 新增：打開 AI 視窗
   const openAiModal = (question: DisplayQuestion) => {
     setSelectedQuestion(question);
     setDraftContent(question.aiResponseDraft || "尚無草稿，請點擊重新生成...");
     setIsAiModalOpen(true);
   };
 
-  // 🔥 新增：重新生成草稿
   const handleRegenerateDraft = async () => {
     if (!selectedQuestion) return;
-    
     setIsRegenerating(true);
     
     try {
-      // 1. 觸發後端任務
       const success = await aiApi.generateDraft(selectedQuestion.id);
-      
       if (success) {
         toast({ title: "AI 思考中", description: "正在撰寫草稿，請稍候..." });
         
-        // 2. 開始輪詢
         let retryCount = 0;
         const maxRetries = 15;
         
         const pollInterval = setInterval(async () => {
           retryCount++;
-          
           try {
-            // 🔥 修正 1: 加上 "as any" 強制轉型，解決 "類型 '{}' 沒有屬性" 的錯誤
             const updatedData = await aiApi.getQuestionAnalysis(selectedQuestion.id) as any;
+            // 確保對應到攤平後的資料結構
+            const newDraft = updatedData?.ai_response_draft;
             
-            // 檢查是否有新的草稿 (容錯處理：檢查不同可能的欄位名稱)
-            const newDraft = updatedData?.ai_response_draft || updatedData?.ai_analysis?.response_draft;
-            
-            if (newDraft) {
+            if (newDraft && newDraft !== selectedQuestion.aiResponseDraft) {
               clearInterval(pollInterval);
-              
-              // A. 更新文字框
               setDraftContent(newDraft);
               
-              // B. 更新選取狀態 (這裡也需要 any，因為 prev 可能是 DisplayQuestion)
               setSelectedQuestion((prev) => prev ? { 
                 ...prev, 
                 aiResponseDraft: newDraft,
-                // 防止這些欄位不存在導致 undefined，給予預設值或保留原值
                 aiSummary: updatedData.ai_summary || prev.aiSummary,
                 difficulty: updatedData.difficulty_level || prev.difficulty,
                 keywords: updatedData.keywords || prev.keywords
               } : null);
 
-              // C. 更新列表
               setQuestions((prev) => prev.map(q => 
                 q.id === selectedQuestion.id 
                   ? { 
@@ -216,57 +206,88 @@ export default function QuestionsPage() {
 
               setIsRegenerating(false);
               toast({ title: "生成完成", description: "AI 草稿已更新！" });
-              
             } else if (retryCount >= maxRetries) {
-              // 超時處理
               clearInterval(pollInterval);
               setIsRegenerating(false);
-              
-              // 🔥 修正 2: 移除 variant: "warning"，改用 default (因為 TypeScript 報錯說沒有 warning)
-              toast({ 
-                title: "生成時間較長", 
-                description: "AI 還在背景運作中，請稍後手動刷新頁面查看。",
-                // variant: "default" // 預設就是 default，所以不需要寫
-              });
+              toast({ title: "生成時間較長", description: "AI 還在背景運作中，請稍後手動刷新頁面查看。" });
             }
           } catch (err) {
             console.error("輪詢檢查失敗:", err);
           }
-        }, 2000); // 每 2 秒檢查一次
-
+        }, 2000); 
       } else {
         setIsRegenerating(false);
         toast({ title: "錯誤", description: "無法啟動 AI 生成任務", variant: "destructive" });
       }
     } catch (error) {
-      console.error(error);
       setIsRegenerating(false);
       toast({ title: "錯誤", description: "連線發生錯誤", variant: "destructive" });
     }
   };
 
-  // 🔥 新增：複製草稿
   const copyDraft = () => {
     navigator.clipboard.writeText(draftContent);
     toast({ title: "已複製", description: "草稿已複製到剪貼簿" });
   };
 
+  // 🔥 補齊：顏色判斷邏輯
+  const getStatusColor = (status: string) => {
+    switch (status?.toUpperCase()) {
+      case "PENDING": return "bg-yellow-100 text-yellow-800 border-yellow-200";
+      case "APPROVED": return "bg-green-100 text-green-800 border-green-200";
+      case "REJECTED": return "bg-red-100 text-red-800 border-red-200";
+      default: return "bg-gray-100 text-gray-800 border-gray-200";
+    }
+  };
+
+  const getDifficultyColor = (difficulty?: string) => {
+    switch (difficulty?.toLowerCase()) {
+      case "easy": return "text-green-600 border-green-200 bg-green-50";
+      case "medium": return "text-yellow-600 border-yellow-200 bg-yellow-50";
+      case "hard": return "text-red-600 border-red-200 bg-red-50";
+      default: return "text-gray-600 border-gray-200 bg-gray-50";
+    }
+  };
+
   const filteredQuestions = questions.filter((question) =>
     question.content.toLowerCase().includes(searchQuery.toLowerCase())
   );
-  
-  // ... (getStatusColor, getDifficultyColor 保持不變) ...
-  const getStatusColor = (status: string) => { /* ...原程式碼... */ return "bg-gray-100"; };
-  const getDifficultyColor = (difficulty?: string) => { /* ...原程式碼... */ return "text-gray-600"; };
 
   return (
     <div className="p-8">
-      {/* ... (標題與篩選器區塊保持不變) ... */}
       <div className="mb-8">
         <h1 className="text-4xl font-bold text-foreground mb-2">提問管理</h1>
-        <p className="text-muted-foreground">審核和管理學生提問</p>
+        <p className="text-muted-foreground">審核和管理學生提問與 AI 分析成果</p>
       </div>
       
+      {/* 🔥 補齊：統計卡片區塊 */}
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
+        <Card>
+          <CardContent className="p-6 flex items-center gap-4">
+            <div className="p-3 bg-primary/10 rounded-full text-primary"><MessageCircle className="w-6 h-6" /></div>
+            <div><p className="text-sm text-muted-foreground">總提問數</p><p className="text-2xl font-bold">{questions.length}</p></div>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardContent className="p-6 flex items-center gap-4">
+            <div className="p-3 bg-yellow-500/10 rounded-full text-yellow-600"><Clock className="w-6 h-6" /></div>
+            <div><p className="text-sm text-muted-foreground">待審核</p><p className="text-2xl font-bold">{questions.filter(q => q.status === "PENDING").length}</p></div>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardContent className="p-6 flex items-center gap-4">
+            <div className="p-3 bg-green-500/10 rounded-full text-green-600"><CheckSquare className="w-6 h-6" /></div>
+            <div><p className="text-sm text-muted-foreground">已批准</p><p className="text-2xl font-bold">{questions.filter(q => q.status === "APPROVED").length}</p></div>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardContent className="p-6 flex items-center gap-4">
+            <div className="p-3 bg-red-500/10 rounded-full text-red-600"><XSquare className="w-6 h-6" /></div>
+            <div><p className="text-sm text-muted-foreground">已拒絕</p><p className="text-2xl font-bold">{questions.filter(q => q.status === "REJECTED").length}</p></div>
+          </CardContent>
+        </Card>
+      </div>
+
       <div className="flex gap-4 mb-6 flex-wrap">
         <div className="flex-1 min-w-[200px]">
           <Input placeholder="搜尋提問內容..." value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} />
@@ -290,12 +311,6 @@ export default function QuestionsPage() {
         <Button onClick={loadQuestions} variant="outline" size="icon"><RefreshCw className="h-4 w-4" /></Button>
       </div>
 
-      {/* ... (統計卡片區塊保持不變) ... */}
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
-         {/* ... (省略統計卡片代碼，保持原樣) ... */}
-      </div>
-
-      {/* 提問列表 */}
       {loading ? (
         <Card><CardContent className="py-12 text-center text-muted-foreground">載入中...</CardContent></Card>
       ) : filteredQuestions.length === 0 ? (
@@ -308,18 +323,16 @@ export default function QuestionsPage() {
                 <div className="flex items-start justify-between gap-4">
                   <div className="flex-1">
                     <div className="flex items-center gap-2 mb-2">
-                      <Badge className={getStatusColor(question.status)}>{question.status}</Badge>
-                      {/* 難度標籤 */}
+                      <Badge className={getStatusColor(question.status)}>{question.status === "PENDING" ? "待處理" : question.status === "APPROVED" ? "已批准" : "已拒絕"}</Badge>
                       {question.difficulty && (
-                        <Badge variant="outline" className={getDifficultyColor(question.difficulty)}>
+                        <Badge variant="outline" className={`uppercase ${getDifficultyColor(question.difficulty)}`}>
                           {question.difficulty}
                         </Badge>
                       )}
-                      {/* AI 摘要標籤 (如果有) */}
                       {question.aiSummary && (
-                        <div className="flex items-center text-xs text-muted-foreground bg-secondary/50 px-2 py-1 rounded">
-                          <Bot className="w-3 h-3 mr-1" />
-                          {question.aiSummary}
+                        <div className="flex items-center text-xs text-muted-foreground bg-secondary/50 px-2 py-1 rounded line-clamp-1 max-w-[300px]" title={question.aiSummary}>
+                          <Bot className="w-3 h-3 mr-1 flex-shrink-0" />
+                          <span className="truncate">{question.aiSummary}</span>
                         </div>
                       )}
                     </div>
@@ -328,13 +341,12 @@ export default function QuestionsPage() {
                     
                     <div className="flex items-center gap-4 text-sm text-muted-foreground">
                       <span>{question.courseName}</span>
-                      <span>{question.pseudonym}</span>
+                      <span>提出者：{question.pseudonym}</span>
                       <span>{question.date}</span>
                     </div>
 
-                    {/* 關鍵字 */}
                     {question.keywords && question.keywords.length > 0 && (
-                      <div className="flex gap-2 mt-3">
+                      <div className="flex gap-2 mt-3 flex-wrap">
                         {question.keywords.map((keyword, idx) => (
                           <Badge key={idx} variant="secondary" className="text-xs">#{keyword}</Badge>
                         ))}
@@ -343,7 +355,6 @@ export default function QuestionsPage() {
                   </div>
 
                   <div className="flex flex-col gap-2">
-                    {/* 🔥 新增：AI 擬答按鈕 */}
                     <Button 
                       size="sm" 
                       variant="default" 
@@ -377,7 +388,6 @@ export default function QuestionsPage() {
         </div>
       )}
 
-      {/* 🔥 新增：AI 輔助視窗 (Dialog) */}
       <Dialog open={isAiModalOpen} onOpenChange={setIsAiModalOpen}>
         <DialogContent className="max-w-3xl">
           <DialogHeader>
@@ -392,7 +402,6 @@ export default function QuestionsPage() {
 
           {selectedQuestion && (
             <div className="grid gap-6 py-4">
-              {/* 原始問題 */}
               <div className="space-y-2">
                 <Label className="text-muted-foreground font-semibold">學生提問</Label>
                 <div className="p-3 bg-secondary/20 rounded-md text-sm border">
@@ -400,25 +409,25 @@ export default function QuestionsPage() {
                 </div>
               </div>
 
-              {/* AI 分析資訊 */}
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-2">
                   <Label className="text-muted-foreground">難度評估</Label>
                   <div className="font-medium flex items-center gap-2">
-                    {selectedQuestion.difficulty || "未分析"}
+                    <Badge variant="outline" className={`uppercase ${getDifficultyColor(selectedQuestion.difficulty)}`}>
+                        {selectedQuestion.difficulty || "未分析"}
+                    </Badge>
                   </div>
                 </div>
                 <div className="space-y-2">
                   <Label className="text-muted-foreground">關鍵字</Label>
                   <div className="flex gap-1 flex-wrap">
                     {selectedQuestion.keywords?.map(k => (
-                      <Badge key={k} variant="secondary" className="text-xs">{k}</Badge>
+                      <Badge key={k} variant="secondary" className="text-xs">#{k}</Badge>
                     )) || "無"}
                   </div>
                 </div>
               </div>
 
-              {/* 回覆草稿區 */}
               <div className="space-y-2">
                 <div className="flex justify-between items-center">
                   <Label className="text-indigo-600 font-semibold flex items-center gap-2">
@@ -449,7 +458,6 @@ export default function QuestionsPage() {
                   <RefreshCw className={`w-4 h-4 ${isRegenerating ? 'animate-spin' : ''}`} />
                   重新生成
                 </Button>
-                {/* 預留功能：直接採納草稿並發布 */}
                 <Button onClick={() => { copyDraft(); setIsAiModalOpen(false); }}>
                   <FileText className="w-4 h-4 mr-2" />
                   複製並使用

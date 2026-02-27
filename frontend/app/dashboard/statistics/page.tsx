@@ -10,6 +10,9 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+// 🔥 新增匯入 Input 與 Label 元件，用於過濾器
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import {
   BarChart,
   Bar,
@@ -22,8 +25,8 @@ import {
   Tooltip,
   Legend,
   ResponsiveContainer,
-  ComposedChart, // 1. 新增 ComposedChart
-  Line,          // 1. 新增 Line
+  ComposedChart, 
+  Line,          
 } from "recharts";
 import {
   Users,
@@ -31,15 +34,15 @@ import {
   CheckCircle,
   Download,
   RefreshCw,
-  TrendingUp, // 2. 新增圖示
+  TrendingUp, 
 } from "lucide-react";
 import {
   reportsApi,
   coursesApi,
   type Statistics,
-  type ClusterSummary,
   type Course,
 } from "@/lib/api";
+import { type ClusterSummary } from "@/lib/api/ai";
 import { useToast } from "@/hooks/use-toast";
 
 export default function StatisticsPage() {
@@ -49,9 +52,14 @@ export default function StatisticsPage() {
   const [clusters, setClusters] = useState<ClusterSummary[]>([]);
   const [loading, setLoading] = useState(false);
   const [exporting, setExporting] = useState<string | null>(null);
+  
+  // =========== 🔥 新增：多維度過濾器狀態 ===========
+  const [startDate, setStartDate] = useState<string>("");
+  const [endDate, setEndDate] = useState<string>("");
+  const [selectedClass, setSelectedClass] = useState<string>("");
+  // ==============================================
+  
   const { toast } = useToast();
-
-  // ... (loadCourses, loadStatistics, loadClusters 邏輯保持不變) ...
 
   useEffect(() => {
     loadCourses();
@@ -66,13 +74,14 @@ export default function StatisticsPage() {
 
   const loadCourses = async () => {
     try {
-      const courses = await coursesApi.getAll();
-      if (courses.length > 0) {
-        setCourses(courses);
-        setSelectedCourse(courses[0]._id || "");
+      const coursesData = await coursesApi.getAll();
+      if (coursesData.length > 0) {
+        setCourses(coursesData);
+        setSelectedCourse(coursesData[0]._id || "");
       }
     } catch (error) {
       console.error("載入課程失敗:", error);
+      toast({ title: "錯誤", description: "載入課程失敗", variant: "destructive" });
     }
   };
 
@@ -84,6 +93,7 @@ export default function StatisticsPage() {
       if (response.success) setStatistics(response.data ?? null);
     } catch (error) {
       console.error(error);
+      toast({ title: "錯誤", description: "載入統計資料失敗", variant: "destructive" });
     } finally {
       setLoading(false);
     }
@@ -99,7 +109,7 @@ export default function StatisticsPage() {
     }
   };
 
-  // 3. 修改匯出邏輯，支援 'clusters'
+  // 🔥 修正：將過濾條件 (startDate, endDate, selectedClass) 帶入 API 呼叫中
   const handleExport = async (type: "questions" | "qas" | "statistics" | "clusters") => {
     if (!selectedCourse) return;
 
@@ -107,24 +117,31 @@ export default function StatisticsPage() {
       setExporting(type);
       let blob: Blob;
 
+      // 準備基礎參數
+      const baseParams: any = { course_id: selectedCourse };
+      if (selectedClass) baseParams.class_id = selectedClass;
+
       switch (type) {
         case "questions":
-          blob = await reportsApi.exportQuestions({ course_id: selectedCourse });
+          blob = await reportsApi.exportQuestions({ 
+            ...baseParams,
+            start_date: startDate || undefined,
+            end_date: endDate || undefined
+          });
           break;
         case "qas":
-          blob = await reportsApi.exportQAs({ course_id: selectedCourse });
+          blob = await reportsApi.exportQAs(baseParams);
           break;
         case "statistics":
-          blob = await reportsApi.exportStatistics({ course_id: selectedCourse });
+          blob = await reportsApi.exportStatistics(baseParams);
           break;
-        case "clusters": // 新增匯出選項
-          // 注意：需確認 reportsApi 有實作 exportClusters
-          // 若無，請在 frontend/lib/api/reports.ts 補上
+        case "clusters": 
+          // 主題聚類通常是看整體的，故只傳入 course_id
           blob = await reportsApi.exportClusters({ course_id: selectedCourse });
           break;
       }
 
-      const url = window.URL.createObjectURL(blob!); // 加 ! 忽略 TS 檢查，實務上 blob 一定有值
+      const url = window.URL.createObjectURL(blob!); 
       const a = document.createElement("a");
       a.href = url;
       a.download = `${type}_${selectedCourse}_${new Date().getTime()}.csv`;
@@ -133,7 +150,7 @@ export default function StatisticsPage() {
       window.URL.revokeObjectURL(url);
       document.body.removeChild(a);
 
-      toast({ title: "成功", description: "資料匯出成功" });
+      toast({ title: "成功", description: "資料匯出成功！" });
     } catch (error) {
       console.error("匯出失敗:", error);
       toast({ title: "錯誤", description: "匯出資料失敗", variant: "destructive" });
@@ -142,7 +159,26 @@ export default function StatisticsPage() {
     }
   };
 
-  // ... (statusChartData 保持不變) ...
+  function getStatusLabel(status: string) {
+    switch (status.toUpperCase()) {
+      case "PENDING": return "待處理";
+      case "APPROVED": return "已同意";
+      case "REJECTED": return "已拒絕";
+      case "DELETED": return "已刪除";
+      default: return status;
+    }
+  }
+
+  function getStatusColor(status: string) {
+    switch (status.toUpperCase()) {
+      case "PENDING": return "#eab308"; 
+      case "APPROVED": return "#22c55e"; 
+      case "REJECTED": return "#ef4444"; 
+      case "DELETED": return "#6b7280"; 
+      default: return "#9ca3af";
+    }
+  }
+
   const statusChartData = statistics?.status_distribution
     ? Object.entries(statistics.status_distribution).map(([status, count]) => ({
         name: getStatusLabel(status),
@@ -151,7 +187,6 @@ export default function StatisticsPage() {
       }))
     : [];
 
-  // 4. 新增難度分佈資料準備
   const difficultyChartData = statistics?.difficulty_distribution
     ? [
         { name: "簡單", value: statistics.difficulty_distribution.easy || 0, fill: "#22c55e" },
@@ -160,27 +195,22 @@ export default function StatisticsPage() {
       ]
     : [];
 
-  const clusterChartData = clusters.slice(0, 10).map((cluster) => ({
-    name: cluster.topic_label || `主題 ${cluster.cluster_id.substring(0, 4)}`, // 優先顯示主題標籤
-    count: cluster.question_count,
-    difficulty: Number((cluster.avg_difficulty || 0).toFixed(2)), // 轉為數字供圖表使用
+  const clusterChartData = clusters.slice(0, 10).map((cluster: any) => ({
+    name: cluster.topic_label || `主題 ${String(cluster._id || cluster.cluster_id || "").substring(0, 4)}`, 
+    count: cluster.question_count || 0,
+    difficulty: Number((cluster.avg_difficulty || 0).toFixed(2)), 
   }));
-
-  function getStatusLabel(status: string) { /* ... 保持不變 ... */ return status; }
-  function getStatusColor(status: string) { /* ... 保持不變 ... */ return "#9ca3af"; }
 
   const selectedCourseName = courses.find((c) => c._id === selectedCourse)?.course_name || "";
 
   return (
     <div className="p-8">
-      {/* ... (標題與篩選器保持不變) ... */}
        <div className="mb-8">
         <h1 className="text-4xl font-bold text-foreground mb-2">統計報表</h1>
         <p className="text-muted-foreground">查看平台統計數據和分析</p>
       </div>
 
       <div className="mb-6 flex items-center gap-4">
-        {/* ... Select 元件保持不變 ... */}
         <div className="flex-1 max-w-md">
             <Select value={selectedCourse} onValueChange={setSelectedCourse}>
             <SelectTrigger><SelectValue placeholder="選擇課程" /></SelectTrigger>
@@ -194,10 +224,15 @@ export default function StatisticsPage() {
          </Button>
       </div>
 
-      {!selectedCourse ? ( /* ... */ <div/> ) : loading ? ( /* ... */ <div/> ) : !statistics ? ( /* ... */ <div/> ) : (
+      {!selectedCourse ? (
+        <Card><CardContent className="py-12 text-center text-muted-foreground">請選擇課程以查看統計報表</CardContent></Card>
+      ) : loading ? (
+        <Card><CardContent className="py-12 text-center text-muted-foreground">資料載入中，請稍候...</CardContent></Card>
+      ) : !statistics ? (
+        <Card><CardContent className="py-12 text-center text-muted-foreground">目前該課程尚無足夠的統計資料</CardContent></Card>
+      ) : (
         <>
-          {/* KPI Cards: 新增平均難度 */}
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-8"> {/* 改成 4 欄 */}
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-8"> 
             <Card>
               <CardContent className="pt-6">
                 <div className="flex justify-between items-start">
@@ -231,7 +266,6 @@ export default function StatisticsPage() {
                 </div>
               </CardContent>
             </Card>
-            {/* 新增：平均難度卡片 */}
             <Card>
               <CardContent className="pt-6">
                 <div className="flex justify-between items-start">
@@ -247,7 +281,6 @@ export default function StatisticsPage() {
             </Card>
           </div>
 
-          {/* Charts: 新增難度分佈 */}
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
             <Card>
               <CardHeader><CardTitle>提問狀態分布</CardTitle></CardHeader>
@@ -263,7 +296,6 @@ export default function StatisticsPage() {
               </CardContent>
             </Card>
 
-            {/* 新增：難度分佈圖表 */}
             <Card>
               <CardHeader><CardTitle>問題難度分布</CardTitle></CardHeader>
               <CardContent>
@@ -284,7 +316,6 @@ export default function StatisticsPage() {
             </Card>
           </div>
 
-          {/* AI 聚類統計：改為複合圖表 (數量+難度) */}
           {clusters.length > 0 && (
             <Card className="mb-8">
               <CardHeader><CardTitle>熱門主題與難度分析（前 10 個）</CardTitle></CardHeader>
@@ -305,11 +336,39 @@ export default function StatisticsPage() {
             </Card>
           )}
 
-          {/* 匯出功能：新增匯出主題按鈕 */}
           <Card>
-            <CardHeader><CardTitle>資料匯出</CardTitle></CardHeader>
+            <CardHeader><CardTitle>資料匯出與過濾設定</CardTitle></CardHeader>
             <CardContent>
-              <div className="grid grid-cols-1 md:grid-cols-4 gap-4"> {/* 改成 4 欄 */}
+              {/* =========== 🔥 新增：過濾器 UI 區塊 =========== */}
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6 p-4 bg-secondary/20 rounded-lg border">
+                <div>
+                  <Label className="mb-2 block text-sm font-medium">班級 / 分組過濾 (可留空)</Label>
+                  <Input 
+                    placeholder="輸入班級或分組代號" 
+                    value={selectedClass} 
+                    onChange={(e) => setSelectedClass(e.target.value)} 
+                  />
+                </div>
+                <div>
+                  <Label className="mb-2 block text-sm font-medium">開始日期 (可留空)</Label>
+                  <Input 
+                    type="date" 
+                    value={startDate} 
+                    onChange={(e) => setStartDate(e.target.value)} 
+                  />
+                </div>
+                <div>
+                  <Label className="mb-2 block text-sm font-medium">結束日期 (可留空)</Label>
+                  <Input 
+                    type="date" 
+                    value={endDate} 
+                    onChange={(e) => setEndDate(e.target.value)} 
+                  />
+                </div>
+              </div>
+              {/* ============================================== */}
+
+              <div className="grid grid-cols-1 md:grid-cols-4 gap-4"> 
                 <Button variant="outline" onClick={() => handleExport("questions")} disabled={exporting === "questions"}>
                   <Download className="w-4 h-4 mr-2" /> 匯出提問 CSV
                 </Button>
@@ -319,7 +378,6 @@ export default function StatisticsPage() {
                 <Button variant="outline" onClick={() => handleExport("statistics")} disabled={exporting === "statistics"}>
                   <Download className="w-4 h-4 mr-2" /> 匯出統計資料
                 </Button>
-                {/* 新增按鈕 */}
                 <Button variant="outline" onClick={() => handleExport("clusters")} disabled={exporting === "clusters"}>
                   <Download className="w-4 h-4 mr-2" /> 匯出主題分析
                 </Button>

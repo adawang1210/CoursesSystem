@@ -3,7 +3,7 @@
  */
 
 import { apiClient, ApiResponse } from "../api-client";
-// 1. 🔥 修改：從 ai.ts 匯入 ClusterSummary，避免重複定義
+// 1. 從 ai.ts 匯入 ClusterSummary
 import { ClusterSummary } from "./ai";
 
 /**
@@ -26,9 +26,6 @@ export interface Statistics {
   cluster_count: number;
 }
 
-// 2. 🔥 修改：刪除這裡原本的 export interface ClusterSummary { ... }
-// 因為已經改從上方 import 了
-
 /**
  * 報表 API
  */
@@ -40,21 +37,24 @@ export const reportsApi = {
     course_id: string;
     class_id?: string;
   }): Promise<ApiResponse<Statistics>> {
+    // 🔥 修正 1：對齊後端 reports.py 的路由
     const response = await apiClient.get<Statistics>(
-      "/questions/statistics/",
+      "/reports/statistics",
       params
     );
     return response;
   },
 
   /**
-   * 取得聚類摘要
+   * 取得聚類摘要 (儀表板前 10 名主題用)
    */
   async getClustersSummary(
     courseId: string
   ): Promise<ApiResponse<ClusterSummary[]>> {
+    // 🔥 修正 2：對齊後端 reports.py 的路由，並改為傳遞 params
     const response = await apiClient.get<ClusterSummary[]>(
-      `/ai/clusters/${courseId}`
+      `/reports/clusters/summary`,
+      { course_id: courseId }
     );
     return response;
   },
@@ -133,7 +133,9 @@ export const reportsApi = {
     return await response.blob();
   },
 
-  // 3. 🔥 新增：匯出 AI 主題分析報表
+  /**
+   * 匯出 AI 主題分析報表
+   */
   async exportClusters(params: { course_id: string }): Promise<Blob> {
     const queryString = new URLSearchParams(
       Object.entries(params).filter(([_, v]) => v !== undefined) as [
