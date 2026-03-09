@@ -38,13 +38,13 @@ class QuestionService:
         database = db.get_db()
         collection = database[self.collection_name]
         
-        # ⚠️ 關鍵步驟：去識別化處理
+        # 去識別化處理
         pseudonym = generate_pseudonym(question_data.line_user_id)
         
-        # 建立提問文件 (不包含原始 line_user_id)
+        # 建立提問文件
         question_doc = {
             "course_id": question_data.course_id,
-            "class_id": getattr(question_data, 'class_id', None), # 容錯處理
+            "class_id": getattr(question_data, 'class_id', None), 
             "pseudonym": pseudonym,  
             "question_text": question_data.question_text,
             "status": QuestionStatus.PENDING,
@@ -54,8 +54,9 @@ class QuestionService:
             "keywords": [],
             "merged_to_qa_id": None,
             "is_merged": False,
-            "source": "LINE",  # 🔥 新增：標記這題來自 LINE Bot
+            "source": "LINE",  
             "original_message_id": getattr(question_data, 'original_message_id', None),
+            "reply_to_qa_id": getattr(question_data, 'reply_to_qa_id', None),
             "created_at": datetime.utcnow(),
             "updated_at": datetime.utcnow()
         }
@@ -64,8 +65,8 @@ class QuestionService:
         new_question_id = str(result.inserted_id)
         question_doc["_id"] = new_question_id
 
-        # 啟動背景任務進行 AI 分析
-        if background_tasks:
+        # 啟動背景任務進行 AI 分析 (如果這是一般提問才分析)
+        if background_tasks and not question_doc.get("reply_to_qa_id"):
             background_tasks.add_task(self.process_new_question_ai, new_question_id, question_data.question_text)
 
         return question_doc
@@ -77,7 +78,6 @@ class QuestionService:
         try:
             print(f"🤖 開始 AI 分析提問: {question_id}")
             
-            # 🔥 修正：移除 await，因為 ai_service 內部是同步呼叫 API 的
             # 1. 執行深度分析 (關鍵字、難度、摘要)
             analysis_data = ai_service.analyze_question(question_text)
             
@@ -121,24 +121,14 @@ class QuestionService:
         skip: int = 0,
         limit: int = 100
     ) -> List[Dict[str, Any]]:
-        """
-        取得課程的提問列表
-        
-        Args:
-            course_id: 課程ID (可選，不傳則查詢所有課程)
-            class_id: 班級ID (可選)
-            status: 提問狀態 (可選)
-            skip: 跳過筆數
-            limit: 限制筆數
-        
-        Note:
-            默認會排除 DELETED 狀態的提問，除非明確指定 status 為 DELETED
-        """
+        """取得課程的提問列表"""
         database = db.get_db()
         collection = database[self.collection_name]
         
-        # 建立查詢條件
-        query: Dict[str, Any] = {}
+        query: Dict[str, Any] = {
+            "reply_to_qa_id": None 
+        }
+        
         if course_id:
             query["course_id"] = course_id
         if class_id:
@@ -146,13 +136,11 @@ class QuestionService:
         if status:
             query["status"] = status
         else:
-            # 如果沒有指定狀態，默認排除已刪除的提問
             query["status"] = {"$ne": QuestionStatus.DELETED}
         
         cursor = collection.find(query).skip(skip).limit(limit).sort("created_at", -1)
         questions = await cursor.to_list(length=limit)
         
-        # 轉換 ObjectId
         for q in questions:
             q["_id"] = str(q["_id"])
         
@@ -164,30 +152,16 @@ class QuestionService:
         new_status: QuestionStatus,
         rejection_reason: Optional[str] = None
     ) -> Optional[Dict[str, Any]]:
-        """
-        更新提問狀態
-        
-        實作狀態機邏輯：
-        - PENDING -> APPROVED, REJECTED, DELETED
-        - APPROVED -> DELETED
-        - 其他狀態不可變更
-        
-        Args:
-            question_id: 提問ID
-            new_status: 新狀態
-            rejection_reason: 拒絕原因（當狀態為 REJECTED 時使用）
-        """
+        """更新提問狀態"""
         database = db.get_db()
         collection = database[self.collection_name]
         
-        # 取得當前提問
         question = await self.get_question(question_id)
         if not question:
             return None
         
         current_status = question["status"]
         
-        # 驗證狀態轉換是否合法
         allowed_transitions = {
             QuestionStatus.PENDING: [
                 QuestionStatus.APPROVED,
@@ -200,21 +174,18 @@ class QuestionService:
             QuestionStatus.WITHDRAWN: [QuestionStatus.DELETED],
         }
         
-        # 如果目標狀態是 DELETED，允許從任何狀態轉換
         if new_status == QuestionStatus.DELETED:
-            pass  # 允許刪除
+            pass  
         elif current_status not in allowed_transitions:
             raise ValueError(f"狀態 {current_status} 無法變更")
         elif new_status not in allowed_transitions[current_status]:
             raise ValueError(f"無法從 {current_status} 轉換至 {new_status}")
         
-        # 更新狀態
         update_data = {
             "status": new_status,
             "updated_at": datetime.utcnow()
         }
         
-        # 如果是拒絕狀態且有提供原因，記錄拒絕原因
         if new_status == QuestionStatus.REJECTED and rejection_reason:
             update_data["rejection_reason"] = rejection_reason
         
@@ -232,17 +203,10 @@ class QuestionService:
         question_id: str,
         analysis_result: AIAnalysisResult
     ) -> Optional[Dict[str, Any]]:
-        """
-        更新 AI 分析結果
-        
-        Args:
-            question_id: 提問ID
-            analysis_result: AI 分析結果
-        """
+        """更新 AI 分析結果"""
         database = db.get_db()
         collection = database[self.collection_name]
         
-        # 根據 difficulty_score 計算 difficulty_level
         difficulty_level = None
         if analysis_result.difficulty_score is not None:
             if analysis_result.difficulty_score < 0.3:
@@ -277,16 +241,7 @@ class QuestionService:
         question_ids: List[str],
         qa_id: str
     ) -> int:
-        """
-        將多個提問合併至 Q&A
-        
-        Args:
-            question_ids: 提問ID列表
-            qa_id: Q&A ID
-        
-        Returns:
-            更新的提問數量
-        """
+        """將多個提問合併至 Q&A"""
         database = db.get_db()
         collection = database[self.collection_name]
         
@@ -331,37 +286,62 @@ class QuestionService:
         course_id: str,
         limit: int = 100
     ) -> List[Dict[str, Any]]:
-        """
-        取得待 AI 分析的提問
-        
-        返回尚未進行 AI 分析的提問 (cluster_id 為 None)
-        僅包含去識別化後的資料
-        """
+        """取得待 AI 分析的提問"""
         database = db.get_db()
         collection = database[self.collection_name]
         
         cursor = collection.find({
             "course_id": course_id,
             "status": QuestionStatus.PENDING,
-            "cluster_id": None
+            "cluster_id": None,
+            "reply_to_qa_id": None
         }).limit(limit)
         
         questions = await cursor.to_list(length=limit)
         
-        # 僅返回 AI 需要的欄位 (確保不洩漏隱私)
         ai_questions = []
         for q in questions:
             ai_questions.append({
                 "_id": str(q["_id"]),
-                "pseudonym": q["pseudonym"],  # 去識別化代號
+                "pseudonym": q["pseudonym"],  
                 "question_text": q["question_text"],
                 "created_at": q["created_at"]
             })
         
         return ai_questions
+
+    # =========== 🔥 核心升級：專門撈取 Q&A 回答給 AI 批閱聚類的函式 ===========
+    async def get_replies_for_clustering(
+        self,
+        qa_id: str,
+        limit: int = 500
+    ) -> List[Dict[str, Any]]:
+        """取得特定 Q&A 且尚未被聚類的學生回答"""
+        database = db.get_db()
+        collection = database[self.collection_name]
+        
+        # 條件：是對此題目的回覆，且還沒被分派到任何聚類群組
+        cursor = collection.find({
+            "reply_to_qa_id": qa_id,
+            "cluster_id": None
+        }).limit(limit)
+        
+        replies = await cursor.to_list(length=limit)
+        
+        ai_replies = []
+        for r in replies:
+            ai_replies.append({
+                "_id": str(r["_id"]),
+                "pseudonym": r.get("pseudonym", "匿名"),  
+                "answer_text": r["question_text"], # 雖然原本設計叫 question_text，但對於 Q&A 來說這是學生的「作答內容」
+                "created_at": r["created_at"]
+            })
+        
+        return ai_replies
+    # ====================================================================
     
     async def delete_question(self, question_id: str) -> bool:
-        """刪除提問 (軟刪除：變更狀態為 DELETED)"""
+        """刪除提問"""
         result = await self.update_question_status(
             question_id,
             QuestionStatus.DELETED
@@ -377,18 +357,19 @@ class QuestionService:
         database = db.get_db()
         collection = database[self.collection_name]
         
-        query: Dict[str, Any] = {"course_id": course_id}
+        query: Dict[str, Any] = {
+            "course_id": course_id,
+            "reply_to_qa_id": None
+        }
+        
         if class_id:
             query["class_id"] = class_id
         
-        # 排除已刪除的提問，保持與提問列表頁面一致
         query["status"] = {"$ne": QuestionStatus.DELETED}
         
-        # 取得所有符合條件的提問
         cursor = collection.find(query)
         questions = await cursor.to_list(length=None)
         
-        # 初始化統計
         total_questions = len(questions)
         pending_count = 0
         approved_count = 0
@@ -407,12 +388,9 @@ class QuestionService:
         cluster_count = 0
         cluster_ids = set()
         
-        # 統計各種指標
         for q in questions:
-            # 狀態統計
             status = q.get("status", "")
             if status:
-                # 統一轉換為大寫進行比較
                 status_upper = status.upper() if isinstance(status, str) else status
                 
                 if status_upper == QuestionStatus.PENDING or status_upper == "PENDING":
@@ -431,7 +409,6 @@ class QuestionService:
                     withdrawn_count += 1
                     status_distribution["WITHDRAWN"] = status_distribution.get("WITHDRAWN", 0) + 1
             
-            # 難度分布統計
             difficulty_level = q.get("difficulty_level")
             if difficulty_level:
                 if difficulty_level == DifficultyLevel.EASY or difficulty_level == "easy":
@@ -441,17 +418,14 @@ class QuestionService:
                 elif difficulty_level == DifficultyLevel.HARD or difficulty_level == "hard":
                     difficulty_distribution["hard"] += 1
             
-            # 難度分數統計
             difficulty_score = q.get("difficulty_score")
             if difficulty_score is not None:
                 difficulty_scores.append(difficulty_score)
             
-            # 聚類統計
             cluster_id = q.get("cluster_id")
             if cluster_id:
                 cluster_ids.add(cluster_id)
         
-        # 計算平均難度
         avg_difficulty_score = sum(difficulty_scores) / len(difficulty_scores) if difficulty_scores else 0.0
         cluster_count = len(cluster_ids)
         
@@ -471,4 +445,3 @@ class QuestionService:
 
 # 全域服務實例
 question_service = QuestionService()
-

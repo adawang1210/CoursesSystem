@@ -79,8 +79,7 @@ class AIService:
 
     def analyze_question(self, question_text: str) -> Dict[str, Any]:
         """
-        [新增功能] 深度分析提問
-        回傳：關鍵字、難度評分、情緒分析、摘要
+        [原有功能] 深度分析提問
         """
         system_prompt = """
         你是一個教育數據分析師。請分析學生的提問，並回傳嚴格的 JSON 格式資料。
@@ -89,14 +88,6 @@ class AIService:
         - difficulty_score: (float) 0.0(最簡單)-1.0(最困難)
         - sentiment: (str) positive/neutral/negative
         - summary: (str) 20字以內的問題摘要
-        
-        範例輸出：
-        {
-            "keywords": ["迴圈", "Python", "錯誤處理"],
-            "difficulty_score": 0.3,
-            "sentiment": "neutral",
-            "summary": "詢問 Python 迴圈語法錯誤"
-        }
         """
         
         messages = [
@@ -104,22 +95,14 @@ class AIService:
             {"role": "user", "content": f"學生提問：{question_text}"}
         ]
         
-        # 呼叫 API 並強制 JSON 模式
         result = self._call_ai_api(messages, json_mode=True, temperature=0.3)
-        
-        # 如果失敗回傳預設值
         if not result:
-            return {
-                "keywords": [],
-                "difficulty_score": 0.0,
-                "sentiment": "neutral",
-                "summary": "分析失敗"
-            }
+            return {"keywords": [], "difficulty_score": 0.0, "sentiment": "neutral", "summary": "分析失敗"}
         return result
 
     def generate_response_draft(self, question_text: str) -> str:
         """
-        [新增功能] 生成教學回覆草稿
+        [原有功能] 生成教學回覆草稿
         """
         system_prompt = """
         你是一位資深的教學助理。請針對學生的問題撰寫一份回覆草稿。
@@ -127,7 +110,6 @@ class AIService:
         1. 語氣親切、鼓勵學生
         2. 結構清晰，先回答核心問題，再補充範例或概念
         3. 使用繁體中文
-        4. 如果問題不明確，請引導學生澄清
         """
         
         messages = [
@@ -138,79 +120,44 @@ class AIService:
         result = self._call_ai_api(messages, temperature=0.7)
         return result if result else "無法生成草稿"
 
-    def generate_cluster_label(self, questions: List[str]) -> Dict[str, Any]:
-        """
-        [新增功能] 為一群相似問題產生主題標籤
-        """
-        questions_text = "\n".join([f"- {q}" for q in questions[:10]]) # 取前10個避免 Token 爆炸
-        
-        system_prompt = """
-        你是一個課程管理者。以下是一群相似的學生提問，請歸納出一個共同的主題。
-        請回傳 JSON 格式：
-        {
-            "topic_label": "主題名稱 (5-10字)",
-            "summary": "這群問題的綜合摘要 (50字以內)"
-        }
-        """
-        
-        messages = [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": f"問題列表：\n{questions_text}"}
-        ]
-        
-        result = self._call_ai_api(messages, json_mode=True)
-        
-        if not result:
-            return {"topic_label": "未命名主題", "summary": ""}
-        return result
-    
-    def perform_advanced_clustering(
+    # =========== 🔥 核心升級：針對 Q&A 回答的批閱式聚類 ===========
+    def perform_qa_answer_clustering(
         self, 
-        questions: List[str], 
-        max_new_topics: int = 5,  # 🔥 改名：這裡接收的是「還能新增幾個」
-        existing_topics: List[str] = None
+        student_answers: List[str], 
+        teacher_question: str,
+        standard_answer: str,
+        max_clusters: int = 5
     ) -> Dict[str, Any]:
         """
-        [進階版] 讓 AI 針對輸入的問題列表進行「多主題拆分」
-        :param max_new_topics: 允許新增的全新主題數量 (已扣除既有主題)
-        :param existing_topics: 既有主題列表 (AI 應優先使用)
+        [全新功能] 根據老師的題目與標準答案，批閱並分類學生的回答
         """
-        if not questions:
+        if not student_answers:
             return {"clusters": []}
 
-        # 1. 幫問題加上索引編號
-        indexed_text = "\n".join([f"ID_{i}: {q[:200]}" for i, q in enumerate(questions)])
+        # 1. 幫學生的回答加上索引編號
+        indexed_text = "\n".join([f"ID_{i}: {ans[:300]}" for i, ans in enumerate(student_answers)])
         
-        # 2. 動態建構既有主題 context
-        topic_context = ""
-        if existing_topics and len(existing_topics) > 0:
-            topics_str = "、".join(existing_topics)
-            topic_context = f"""
-            3. **既有主題清單**：目前資料庫已有以下主題：【{topics_str}】。
-               - 請 **優先** 將問題歸類到上述既有主題中。
-               - 歸類到既有主題 **不消耗** 新增額度。
-            """
-
-        # 3. 使用 f-string 注入 max_new_topics 變數
+        # 2. 設計批閱與分群專用的 Prompt
         system_prompt = f"""
-        你是一個精準的提問分類系統。請分析使用者的問題列表並進行歸類。
+        你是一位專業的大學課程助教。老師出了一道課堂問答題，並提供了標準答案。
+        請根據「題目」與「標準答案」，批閱以下學生的作答，並將具有「相似理解程度」、「相同迷思概念」或「相似錯誤」的回答進行分群聚類。
+
+        【題目資訊】
+        - 老師的提問：{teacher_question}
+        - 期望的標準答案：{standard_answer}
+
+        【任務規則】
+        1. **概念分群**：請依據學生的理解程度分類（例如：「觀念完全正確」、「部分正確：缺少XX概念」、「嚴重迷思：誤解YY」等）。
+        2. **群組數量**：請將學生的回答分成 1 到 {max_clusters} 個群組。
+        3. **強制覆蓋 (重要)**：列表中的「每一個」學生的回答都必須被分配到某個群組中 (Index 0 到 {len(student_answers)-1})，絕不能遺漏任何一個學生。
         
-        規則：
-        1. **優先歸類**：請優先檢查問題是否屬於「既有主題」。
-        2. **新增限制**：如果問題真的無法歸入既有主題，你可以建立新的主題，但 **最多只能建立 {max_new_topics} 個全新的主題**。
-           - 如果新增額度用完，請將剩餘問題歸入「其他」或強制併入最接近的既有主題。
-        {topic_context}
-        4. **合併策略**：請積極合併語意相似的主題 (例如：'Python 迴圈' 與 'For Loop' 應合併)。
-        5. 🔥 **強制覆蓋 (重要)**：**列表中的「每一個」問題都必須被分配到某個群組中 (Index 0 到 {len(questions)-1})，不能有遺漏。**
-           - 請確保回傳的 JSON 中，所有問題的 Index 都有出現。
-        
-        6. **格式要求**：請回傳嚴格的 JSON 格式，不要包含 Markdown 標記。格式如下：
+        4. **格式要求**：請回傳嚴格的 JSON 格式，格式如下：
         {{
             "clusters": [
                 {{
-                    "topic_label": "主題名稱 (5-10字)",
-                    "summary": "主題摘要 (簡述該群組包含的問題類型)",
-                    "question_indices": [0, 2, 5] // 對應原始列表的索引 (整數)
+                    "topic_label": "群組標籤 (例如：觀念完全正確 / 忽略了成本考量)",
+                    "summary": "此群組的批閱總結 (簡述這群學生的共同理解特徵或盲點)",
+                    "question_indices": [0, 2, 5] // 對應原始作答列表的索引 (整數)
                 }}
             ]
         }}
@@ -218,16 +165,17 @@ class AIService:
         
         messages = [
             {"role": "system", "content": system_prompt},
-            {"role": "user", "content": f"請對以下問題進行分類：\n{indexed_text}"}
+            {"role": "user", "content": f"請對以下學生的回答進行批閱與分群：\n{indexed_text}"}
         ]
 
         # 呼叫 LLM
-        result = self._call_ai_api(messages, json_mode=True)
+        result = self._call_ai_api(messages, json_mode=True, temperature=0.5) # 稍微調低溫度以求準確分類
         
         if not result:
             return {"clusters": []}
             
         return result
+    # ==========================================================
 
 # 建立全域實例
 ai_service = AIService()

@@ -4,14 +4,15 @@ LINE 服務邏輯層
 """
 import traceback
 import asyncio
-from datetime import datetime
+from datetime import datetime, timedelta
 from bson import ObjectId
 from linebot.v3.messaging import (
     Configuration,
     AsyncApiClient,
     AsyncMessagingApi,
     ReplyMessageRequest,
-    TextMessage
+    TextMessage,
+    MulticastRequest
 )
 from linebot.v3.webhooks import (
     MessageEvent,
@@ -47,6 +48,90 @@ class LineService:
         except Exception as e:
             print(f"❌ 傳送 LINE 回覆失敗: {str(e)}")
 
+    async def broadcast_qa_to_course(self, course_id: str, qa_data: dict):
+        """將 Q&A 推播給該課程的所有學生"""
+        if not settings.LINE_CHANNEL_ACCESS_TOKEN:
+            print("⚠️ LINE_CHANNEL_ACCESS_TOKEN 未設定，無法推播")
+            return
+
+        database = db.get_db()
+        
+        cursor = database["line_users"].find({"current_course_id": course_id})
+        users = await cursor.to_list(length=None)
+        
+        user_ids = [u["user_id"] for u in users if "user_id" in u]
+        
+        if not user_ids:
+            print(f"課程 {course_id} 目前沒有綁定的學生，略過推播")
+            return
+
+        text = f"📢 【課堂 Q&A 推播】\n\n❓ 問題：\n{qa_data.get('question')}"
+        
+        # =========== 🔥 修改 1：區分「限時互動」與「不限時互動」的推播文案 ===========
+        if qa_data.get("allow_replies"):
+            if qa_data.get("duration_minutes"):
+                text += f"\n\n⏳ 老師已開啟限時任務！\n請在 {qa_data.get('duration_minutes')} 分鐘內直接在此回覆您的想法或答案。"
+            else:
+                text += f"\n\n📝 老師已發布課後互動任務！\n請直接在此回覆您的想法或答案（本任務不限時，直到老師關閉為止）。"
+        else:
+            text += f"\n\n💡 參考解答：\n{qa_data.get('answer')}"
+        # ======================================================================
+        
+        batch_size = 500
+        try:
+            async with AsyncApiClient(self.configuration) as api_client:
+                line_bot_api = AsyncMessagingApi(api_client)
+                
+                for i in range(0, len(user_ids), batch_size):
+                    batch_user_ids = user_ids[i:i+batch_size]
+                    await line_bot_api.multicast(
+                        MulticastRequest(
+                            to=batch_user_ids,
+                            messages=[TextMessage(text=text)]
+                        )
+                    )
+            print(f"✅ 成功推播 Q&A 給 {len(user_ids)} 位學生")
+        except Exception as e:
+            print(f"❌ 推播 Q&A 失敗: {str(e)}")
+            traceback.print_exc()
+
+    async def broadcast_announcement_to_course(self, course_id: str, announcement_data: dict):
+        """將課堂公告推播給該課程的所有學生"""
+        if not settings.LINE_CHANNEL_ACCESS_TOKEN:
+            print("⚠️ LINE_CHANNEL_ACCESS_TOKEN 未設定，無法推播公告")
+            return
+
+        database = db.get_db()
+        
+        cursor = database["line_users"].find({"current_course_id": course_id})
+        users = await cursor.to_list(length=None)
+        
+        user_ids = [u["user_id"] for u in users if "user_id" in u]
+        
+        if not user_ids:
+            print(f"課程 {course_id} 目前沒有綁定的學生，略過推播公告")
+            return
+
+        text = f"🔔 【課堂公告】\n\n📌 標題：{announcement_data.get('title')}\n\n📝 內容：\n{announcement_data.get('content')}"
+        
+        batch_size = 500
+        try:
+            async with AsyncApiClient(self.configuration) as api_client:
+                line_bot_api = AsyncMessagingApi(api_client)
+                
+                for i in range(0, len(user_ids), batch_size):
+                    batch_user_ids = user_ids[i:i+batch_size]
+                    await line_bot_api.multicast(
+                        MulticastRequest(
+                            to=batch_user_ids,
+                            messages=[TextMessage(text=text)]
+                        )
+                    )
+            print(f"✅ 成功推播公告給 {len(user_ids)} 位學生")
+        except Exception as e:
+            print(f"❌ 推播公告失敗: {str(e)}")
+            traceback.print_exc()
+
     async def handle_follow(self, event: FollowEvent):
         """處理加入好友事件"""
         welcome_msg = (
@@ -59,18 +144,17 @@ class LineService:
         await self._reply_text(event.reply_token, welcome_msg)
 
     async def handle_postback(self, event: PostbackEvent):
-        """處理按鈕回傳事件 (預留擴充)"""
+        """處理按鈕回傳事件"""
         pass
 
     async def handle_text_message(self, event: MessageEvent):
-        """處理文字訊息的主邏輯 (路由判斷)"""
+        """處理文字訊息的主邏輯"""
         user_id = event.source.user_id
         message_text = event.message.text.strip()
         reply_token = event.reply_token
         
         database = db.get_db()
 
-        # 1. 記錄這則收到的原始訊息 (Log 用於統計與除錯)
         pseudonym = generate_pseudonym(user_id)
         await database["line_messages"].insert_one({
             "user_id": user_id,
@@ -83,7 +167,6 @@ class LineService:
             "created_at": datetime.utcnow()
         })
 
-        # 2. 判斷是否為「系統指令」
         if message_text.startswith("綁定 "):
             await self._handle_bind_course(user_id, message_text, reply_token)
             return
@@ -92,36 +175,27 @@ class LineService:
             await self._handle_unbind_course(user_id, reply_token)
             return
 
-        # 3. 若不是指令，則視為「一般提問」
-        # 🔥 修改：傳入 event.message.id 以便完整寫入資料庫
         await self._handle_question(user_id, pseudonym, message_text, reply_token, event.message.id)
 
     async def _handle_bind_course(self, user_id: str, message_text: str, reply_token: str):
         """處理綁定課程邏輯"""
         database = db.get_db()
-        
-        # 拆解指令，例如 "綁定 65d4a1b2..."
         parts = message_text.split(" ", 1)
         if len(parts) < 2:
             await self._reply_text(reply_token, "⚠️ 格式錯誤。請輸入「綁定 [課程代碼]」。")
             return
             
         course_code = parts[1].strip()
-        
-        # 尋找課程
         course = None
         try:
-            # 先假設老師給的是資料庫的 ObjectId
             course = await database["courses"].find_one({"_id": ObjectId(course_code)})
         except:
-            # 容錯處理：如果輸入的不是合法 ID 格式，改用課程名稱去配對
             course = await database["courses"].find_one({"course_name": course_code})
             
         if not course:
             await self._reply_text(reply_token, f"❌ 找不到代碼為「{course_code}」的課程。請向助教或老師確認正確的代碼喔！")
             return
 
-        # 更新或新增該使用者的綁定狀態到 line_users 表
         await database["line_users"].update_one(
             {"user_id": user_id},
             {"$set": {
@@ -145,47 +219,64 @@ class LineService:
         )
         await self._reply_text(reply_token, "👋 已為您解除綁定。若有其他課程的問題，請重新輸入綁定指令。")
 
-    # 🔥 修改：接收 message_id
     async def _handle_question(self, user_id: str, pseudonym: str, message_text: str, reply_token: str, message_id: str):
-        """處理學生提問邏輯 (寫入資料庫供 AI 聚類)"""
+        """處理學生提問與回覆邏輯 (僅限 Q&A 任務)"""
         database = db.get_db()
         
-        # 檢查該使用者目前是否有綁定課程
         user_data = await database["line_users"].find_one({"user_id": user_id})
         
         if not user_data or not user_data.get("current_course_id"):
-            await self._reply_text(reply_token, "⚠️ 您尚未綁定任何課程！\n請先輸入「綁定 [課程代碼]」來告訴我您要問哪堂課的問題。")
+            await self._reply_text(reply_token, "⚠️ 您尚未綁定任何課程！\n請先輸入「綁定 [課程代碼]」來告訴我您要參與哪堂課。")
             return
 
         course_id = user_data["current_course_id"]
+        now = datetime.utcnow()
         
+        # =========== 🔥 修改 2：將 $or 加入查詢，允許 expires_at 為 None (代表不限時) ===========
+        active_qa = await database["qas"].find_one({
+            "course_id": course_id,
+            "allow_replies": True,
+            "$or": [
+                {"expires_at": None},
+                {"expires_at": {"$gt": now}}
+            ]
+        }, sort=[("created_at", -1)])
+        # ==============================================================================
+        
+        if not active_qa:
+            await self._reply_text(reply_token, "ℹ️ 目前沒有開放中的課後 Q&A 任務喔！\n請等候老師或助教發布本週的問題後，再直接於此回覆您的答案。")
+            return
+            
+        reply_to_qa_id = str(active_qa["_id"])
+        
+        # 防重複作答檢查邏輯
+        existing_reply = await database["questions"].find_one({
+            "reply_to_qa_id": reply_to_qa_id,
+            "pseudonym": pseudonym 
+        })
+        
+        if existing_reply:
+            await self._reply_text(reply_token, "⚠️ 您已經提交過這題的答案囉！請耐心等候老師批閱。")
+            return
+
+        # 寫入資料庫
         try:
-            # 🔥 修改：建立 Pydantic 結構
             new_q_data = QuestionCreate(
                 course_id=course_id,
                 line_user_id=user_id,
                 question_text=message_text,
-                original_message_id=message_id
+                original_message_id=message_id,
+                reply_to_qa_id=reply_to_qa_id 
             )
             
-            # 🔥 直接呼叫 question_service，它會自動處理去識別化與狀態更新
-            question_doc = await question_service.create_question(new_q_data)
-            
-            # 🔥 透過 asyncio 在背景非同步執行 AI 分析，這樣才不會卡住 LINE 的回覆速度！
-            asyncio.create_task(
-                question_service.process_new_question_ai(question_doc["_id"], message_text)
-            )
-            
-            # 回覆確認訊息給學生
-            await self._reply_text(reply_token, "📥 已匿名收到您的提問！\n老師會在課後由 AI 助理協助整理並統一回覆大家。")
+            await question_service.create_question(new_q_data)
+            await self._reply_text(reply_token, "✅ 已成功收到您的作答！")
             
         except ValueError as ve:
-            # 捕捉到課程不存在或停用的錯誤
-            await self._reply_text(reply_token, f"❌ 提問失敗：{str(ve)}")
+            await self._reply_text(reply_token, f"❌ 操作失敗：{str(ve)}")
         except Exception as e:
-            print(f"❌ 寫入提問失敗: {str(e)}")
+            print(f"❌ 寫入失敗: {str(e)}")
             traceback.print_exc()
-            await self._reply_text(reply_token, "❌ 系統發生小錯誤，無法儲存您的提問，請稍後再試一次。")
+            await self._reply_text(reply_token, "❌ 系統發生小錯誤，請稍後再試一次。")
 
-# 建立實例供 router 調用
 line_service = LineService()

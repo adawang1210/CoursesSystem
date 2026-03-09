@@ -6,13 +6,14 @@ import { apiClient } from "@/lib/api-client";
 export interface ClusterSummary {
   _id?: string;               // MongoDB 的 ID
   course_id: string;          // 課程 ID
+  qa_id?: string;             // 🔥 新增：關聯的 Q&A 題目 ID
   topic_label: string;        // AI 生成的主題標籤
-  summary?: string;           // 🔥 新增：該主題的綜合摘要 (AI 生成的解釋)
-  keywords: string[];         // 🔥 修正：對應後端的 keywords (原為 top_keywords)
+  summary?: string;           // 該主題的綜合摘要 (AI 生成的解釋)
+  keywords: string[];         // 對應後端的 keywords
   question_count: number;     // 包含的問題數量
   avg_difficulty: number;     // 平均難度
-  is_locked?: boolean;        // 🔥 新增：是否已被人工鎖定
-  manual_label?: string;      // 🔥 新增：人工手動設定的標籤名稱
+  is_locked?: boolean;        // 是否已被人工鎖定
+  manual_label?: string;      // 人工手動設定的標籤名稱
   created_at?: string;
   updated_at?: string;
 }
@@ -30,14 +31,17 @@ export const aiApi = {
   /**
    * 取得課程的 AI 聚類主題牆資料
    * @param courseId 課程 ID
+   * @param qaId (選填) 指定 Q&A ID，若傳入則只撈取該題目的批閱分類
    */
-  getClusters: async (courseId: string): Promise<ClusterSummary[]> => {
-    console.log(`[aiApi] 正在抓取課程 ${courseId} 的聚類資料...`); 
+  getClusters: async (courseId: string, qaId?: string): Promise<ClusterSummary[]> => {
+    console.log(`[aiApi] 正在抓取課程 ${courseId} 的聚類資料 (qaId: ${qaId || '一般提問'})...`); 
     
     try {
-      const response = await apiClient.get<APIResponse<ClusterSummary[]>>(
-        `/ai/clusters/${courseId}`
-      );
+      // 🔥 新增：若有 qaId 則組裝 query string
+      const params = qaId ? new URLSearchParams({ qa_id: qaId }) : undefined;
+      const url = params ? `/ai/clusters/${courseId}?${params.toString()}` : `/ai/clusters/${courseId}`;
+
+      const response = await apiClient.get<APIResponse<ClusterSummary[]>>(url);
       
       console.log("[aiApi] 後端回應:", response.data);
 
@@ -51,12 +55,15 @@ export const aiApi = {
   /**
    * [手動觸發] 執行課程的聚類分析任務
    * @param courseId 課程 ID
+   * @param maxClusters 最大分群數
+   * @param qaId (選填) 指定 Q&A ID，若傳入則觸發「批閱模式」
    */
-  runClustering: async (courseId: string, maxClusters: number = 5): Promise<boolean> => {
+  runClustering: async (courseId: string, maxClusters: number = 5, qaId?: string): Promise<boolean> => {
     try {
       await apiClient.post(`/ai/clusters/generate`, { 
         course_id: courseId, 
-        max_clusters: maxClusters 
+        max_clusters: maxClusters,
+        qa_id: qaId // 🔥 新增：傳遞 qa_id 給後端觸發批閱雙引擎
       });
       return true;
     } catch (error) {
@@ -108,12 +115,14 @@ export const aiApi = {
    * [新增] 人工手動建立空分類
    * @param courseId 課程 ID
    * @param topicLabel 分類標題
+   * @param qaId (選填) 指定 Q&A ID，若傳入則建立該題目的專屬空分類
    */
-  createCluster: async (courseId: string, topicLabel: string): Promise<APIResponse<any> | null> => {
+  createCluster: async (courseId: string, topicLabel: string, qaId?: string): Promise<APIResponse<any> | null> => {
     try {
       const response = await apiClient.post(`/ai/clusters/manual`, { 
         course_id: courseId, 
-        topic_label: topicLabel 
+        topic_label: topicLabel,
+        qa_id: qaId // 🔥 新增：讓手動分類也能綁定 Q&A
       });
       return response as APIResponse<any>;
     } catch (error) {

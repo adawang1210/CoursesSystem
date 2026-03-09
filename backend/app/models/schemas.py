@@ -134,13 +134,13 @@ class QuestionBase(BaseModel):
     ai_summary: Optional[str] = Field(None, description="AI 對問題的摘要或重述")
     sentiment_score: Optional[float] = Field(None, description="情緒分數 (-1 to 1)")
     
-    # 合併相關
+    # 合併與回覆相關
     merged_to_qa_id: Optional[str] = Field(None, description="合併至的 Q&A ID")
     is_merged: bool = Field(default=False, description="是否已合併")
+    reply_to_qa_id: Optional[str] = Field(None, description="回覆特定 Q&A 的 ID (用於限時廣播)")
     
     # 元資料
     original_message_id: Optional[str] = Field(None, description="Line 訊息ID")
-    # 🔥 新增：來源標記 (預設 WEB)
     source: str = Field(default="WEB", description="提問來源 (WEB, LINE)")
 
 
@@ -151,6 +151,7 @@ class QuestionCreate(BaseModel):
     line_user_id: str = Field(..., description="Line User ID (將被去識別化)")
     question_text: str
     original_message_id: Optional[str] = None
+    reply_to_qa_id: Optional[str] = None
 
 
 class QuestionStatusUpdate(BaseModel):
@@ -192,6 +193,10 @@ class QABase(BaseModel):
     # 作者資訊
     created_by: str = Field(..., description="建立者ID (教師/助教)")
 
+    allow_replies: bool = Field(default=False, description="是否透過 LINE 開放學生限時回覆")
+    duration_minutes: Optional[int] = Field(None, description="開放回覆的時長(分鐘)")
+    expires_at: Optional[datetime] = Field(None, description="限時回覆截止時間")
+
 
 class QACreate(BaseModel):
     """建立 Q&A"""
@@ -202,6 +207,10 @@ class QACreate(BaseModel):
     category: Optional[str] = None
     tags: List[str] = Field(default_factory=list)
     is_published: bool = False
+    
+    allow_replies: bool = False
+    duration_minutes: Optional[int] = None
+    created_by: str = Field("system", description="建立者ID")
 
 
 class QA(QABase):
@@ -295,36 +304,13 @@ class AIAnalysisRequest(BaseModel):
 class AIAnalysisResult(BaseModel):
     """AI 分析結果"""
     question_id: str = Field(..., description="提問ID")
-    # 🔥 修改：cluster_id 改為 Optional，因新提問尚未分群
     cluster_id: Optional[str] = Field(None, description="聚類ID")
     difficulty_score: float = Field(..., description="難度分數")
     keywords: List[str] = Field(default_factory=list, description="關鍵字")
     response_draft: Optional[str] = Field(None, description="AI 生成的回覆草稿")
     summary: Optional[str] = Field(None, description="問題摘要")
     suggested_tags: List[str] = Field(default_factory=list, description="建議標籤")
-    # 🔥 新增：情緒分數欄位
     sentiment_score: Optional[float] = Field(None, description="情緒分數")
-
-
-# ==================== 統計報表相關模型 ====================
-
-class ReportFilter(BaseModel):
-    """報表篩選條件"""
-    course_id: Optional[str] = None
-    class_id: Optional[str] = None
-    start_date: Optional[datetime] = None
-    end_date: Optional[datetime] = None
-    status: Optional[QuestionStatus] = None
-
-
-class QuestionStatistics(BaseModel):
-    """提問統計"""
-    total_questions: int
-    pending_questions: int
-    approved_questions: int
-    rejected_questions: int
-    average_difficulty: float
-    questions_by_cluster: Dict[str, int]
 
 
 # ==================== LINE 訊息相關模型 ====================
@@ -342,9 +328,9 @@ class LineMessageType(str, Enum):
 
 class LineMessageDirection(str, Enum):
     """LINE 訊息方向"""
-    RECEIVED = "received"  # 收到的訊息
-    SENT = "sent"  # 發送的訊息
-    FAILED = "failed"  # 發送失敗
+    RECEIVED = "received"
+    SENT = "sent"
+    FAILED = "failed"
 
 
 class LineMessageBase(BaseModel):
@@ -355,17 +341,14 @@ class LineMessageBase(BaseModel):
     direction: LineMessageDirection = Field(..., description="訊息方向")
     content: str = Field(..., description="訊息內容")
     
-    # 關聯資訊
     course_id: Optional[str] = Field(None, description="關聯的課程ID")
     class_id: Optional[str] = Field(None, description="關聯的班級ID")
     question_id: Optional[str] = Field(None, description="關聯的提問ID")
     
-    # LINE 相關
     line_message_id: Optional[str] = Field(None, description="LINE 訊息ID")
     reply_token: Optional[str] = Field(None, description="回覆 token")
     
-    # 額外資訊
-    error_message: Optional[str] = Field(None, description="錯誤訊息（如果發送失敗）")
+    error_message: Optional[str] = Field(None, description="錯誤訊息")
     metadata: Dict[str, Any] = Field(default_factory=dict, description="其他元資料")
 
 
@@ -392,26 +375,30 @@ class LineMessage(LineMessageBase):
     class Config:
         populate_by_name = True
 
+# ==================== 聚類 (Cluster) 相關模型 ====================
+
 class ClusterBase(BaseModel):
-    """AI 聚類主題模型 (用來描述一群相似的問題)"""
+    """AI 聚類主題模型"""
     course_id: str = Field(..., description="所屬課程ID")
-    topic_label: str = Field(..., description="AI 生成的主題標籤 (例如: '迴圈語法錯誤')")
-    summary: Optional[str] = Field(None, description="該主題的綜合摘要")
-    keywords: List[str] = Field(default_factory=list, description="該聚類的代表性關鍵字")
     
-    # 統計資訊
-    question_count: int = Field(default=0, description="包含的問題數量")
+    # =========== 🔥 新增：關聯至 Q&A 的 ID ===========
+    qa_id: Optional[str] = Field(None, description="關聯的 Q&A 題目 ID，代表此群組是針對該題目的回答分類")
+    # ===============================================
+    
+    topic_label: str = Field(..., description="AI 生成的主題標籤 (例如：觀念完全正確、混淆某觀念)")
+    summary: Optional[str] = Field(None, description="該主題的綜合摘要或批閱總結")
+    keywords: List[str] = Field(default_factory=list, description="代表性關鍵字")
+    
+    question_count: int = Field(default=0, description="包含的問題/回答數量")
     avg_difficulty: float = Field(default=0.0, description="平均難度")
 
-    is_locked: bool = Field(default=False, description="是否已被人工鎖定 (若為 True，AI 重新分析時將保留此分類)")
+    is_locked: bool = Field(default=False, description="是否已被人工鎖定")
     manual_label: Optional[str] = Field(None, description="人工手動設定的標籤名稱")
 
 class ClusterCreate(ClusterBase):
-    """建立聚類"""
     pass
 
 class Cluster(ClusterBase):
-    """聚類完整模型"""
     id: str = Field(alias="_id")
     created_at: datetime = Field(default_factory=datetime.utcnow)
     updated_at: datetime = Field(default_factory=datetime.utcnow)
@@ -420,11 +407,14 @@ class Cluster(ClusterBase):
         populate_by_name = True
 
 class ClusterUpdate(BaseModel):
-    """[新增] 用於 PATCH /ai/clusters/{id} 的請求模型"""
     topic_label: Optional[str] = Field(None, description="新的主題名稱")
-    is_locked: bool = Field(default=True, description="更新後是否自動鎖定 (預設 True)")
+    is_locked: bool = Field(default=True, description="更新後是否自動鎖定")
 
 class ClusterGenerateRequest(BaseModel):
-    """[新增] 用於 POST /ai/clusters/generate 的請求模型"""
     course_id: str = Field(..., description="課程ID")
-    max_clusters: int = Field(default=5, ge=1, le=20, description="希望 AI 分成的最大群組數量")
+    
+    # =========== 🔥 新增：觸發 AI 聚類時傳入的 Q&A ID ===========
+    qa_id: Optional[str] = Field(None, description="指定要進行聚類的 Q&A 題目 ID")
+    # ========================================================
+    
+    max_clusters: int = Field(default=5, ge=1, le=20, description="群組數量上限")

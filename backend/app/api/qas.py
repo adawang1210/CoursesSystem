@@ -3,6 +3,7 @@ Q&A 管理 API 路由
 """
 from fastapi import APIRouter, HTTPException, Query
 from typing import Optional, List
+from datetime import datetime
 from ..models.schemas import QACreate
 from ..services.qa_service import qa_service
 
@@ -16,7 +17,7 @@ async def create_qa(
     created_by: str = Query(..., description="建立者ID (教師/助教)")
 ):
     """
-    建立新 Q&A
+    建立新 Q&A (支援限時推播)
     
     **教師/助教端操作**
     """
@@ -45,6 +46,23 @@ async def get_qa(qa_id: str):
         "success": True,
         "data": qa
     }
+
+
+# =========== 🔥 新增：取得特定 Q&A 的所有學生回覆 ===========
+@router.get("/{qa_id}/replies", response_model=dict, summary="取得對此 Q&A 的學生回覆")
+async def get_qa_replies(qa_id: str):
+    """
+    取得特定 Q&A 的所有學生回覆紀錄
+    這會提供給前端的對話泡泡面板使用
+    """
+    replies = await qa_service.get_qa_replies(qa_id)
+    
+    return {
+        "success": True,
+        "data": replies,
+        "total": len(replies)
+    }
+# =========================================================
 
 
 @router.get("/", response_model=dict, summary="取得 Q&A 列表")
@@ -82,6 +100,23 @@ async def update_qa(qa_id: str, update_data: dict):
     return {
         "success": True,
         "message": "Q&A 更新成功",
+        "data": qa
+    }
+
+
+@router.post("/{qa_id}/stop", response_model=dict, summary="提前結束限時 Q&A")
+async def stop_qa_replies(qa_id: str):
+    """
+    將 Q&A 的截止時間設為現在，立即停止接收學生的回覆
+    """
+    qa = await qa_service.update_qa(qa_id, {"expires_at": datetime.utcnow()})
+    
+    if not qa:
+        raise HTTPException(status_code=404, detail="找不到此 Q&A")
+    
+    return {
+        "success": True,
+        "message": "已提前結束限時回覆",
         "data": qa
     }
 
@@ -137,4 +172,3 @@ async def search_qas(
         "data": qas,
         "total": len(qas)
     }
-

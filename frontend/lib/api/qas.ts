@@ -16,6 +16,12 @@ export interface QA {
   created_by?: string;
   created_at?: string;
   updated_at?: string;
+  
+  // =========== 🔥 新增：限時互動欄位 ===========
+  allow_replies?: boolean;
+  duration_minutes?: number;
+  expires_at?: string;
+  // ==========================================
 }
 
 export interface CreateQADto {
@@ -27,6 +33,11 @@ export interface CreateQADto {
   related_question_ids?: string[];
   is_published?: boolean;
   created_by?: string;
+  
+  // =========== 🔥 新增：限時互動參數 ===========
+  allow_replies?: boolean;
+  duration_minutes?: number;
+  // ==========================================
 }
 
 export interface UpdateQADto {
@@ -35,6 +46,11 @@ export interface UpdateQADto {
   category?: string;
   tags?: string[];
   is_published?: boolean;
+  
+  // =========== 🔥 新增：更新時也支援這些參數 ===========
+  allow_replies?: boolean;
+  duration_minutes?: number;
+  expires_at?: string;
 }
 
 export const qasApi = {
@@ -46,7 +62,8 @@ export const qasApi = {
     limit?: number;
   }) {
     const response = await apiClient.get<QA[]>("/qas/", params);
-    return response.data || [];
+    // 兼容後端回傳格式 { success: true, data: [...] } 或直接回傳陣列
+    return (response.data as any)?.data || response.data || [];
   },
 
   // 獲取單一 Q&A
@@ -81,7 +98,7 @@ export const qasApi = {
   // 搜尋 Q&A
   async search(params: { course_id?: string; query: string }) {
     const response = await apiClient.get<QA[]>("/qas/search/", params);
-    return response.data || [];
+    return (response.data as any)?.data || response.data || [];
   },
 
   // 連結提問到 Q&A
@@ -90,4 +107,23 @@ export const qasApi = {
       question_ids: questionIds,
     });
   },
+
+  // =========== 🔥 新增：提前結束限時 Q&A ===========
+  async stopQAReplies(id: string) {
+    // 呼叫後端的 /qas/{qa_id}/stop API
+    const response = await apiClient.post<{ success: boolean; message: string; data: QA }>(
+      `/qas/${id}/stop`, 
+      {}
+    );
+    return response.data;
+  },
+  // ===============================================
+
+  // =========== 🔥 新增：取得 Q&A 的學生回覆 ===========
+  async getReplies(id: string) {
+    const response = await apiClient.get<any>(`/qas/${id}/replies`);
+    // 提取後端回傳的 { success: true, data: [...] } 裡面的陣列
+    return response.data?.data || response.data || [];
+  },
+  // ===============================================
 };
