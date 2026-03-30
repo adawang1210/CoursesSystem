@@ -10,13 +10,11 @@ from enum import Enum
 
 # ==================== 枚舉類型 ====================
 
-class QuestionStatus(str, Enum):
-    """提問狀態"""
-    PENDING = "PENDING"  # 待處理
-    APPROVED = "APPROVED"  # 已同意
-    REJECTED = "REJECTED"  # 已拒絕
-    DELETED = "DELETED"  # 已刪除
-    WITHDRAWN = "WITHDRAWN"  # 已撤回
+class ReviewStatus(str, Enum):
+    """作答批閱狀態"""
+    PENDING = "pending"    # 待批閱
+    APPROVED = "approved"  # 通過 / 觀念正確
+    REJECTED = "rejected"  # 退回 / 觀念錯誤或需補充
 
 
 class UserRole(str, Enum):
@@ -75,16 +73,6 @@ class Course(CourseBase):
     
     class Config:
         populate_by_name = True
-        json_schema_extra = {
-            "example": {
-                "course_code": "CS101",
-                "course_name": "計算機概論",
-                "semester": "113-1",
-                "description": "計算機科學入門課程",
-                "teacher_ids": ["teacher001"],
-                "is_active": True
-            }
-        }
 
 
 # ==================== 班級相關模型 ====================
@@ -114,15 +102,22 @@ class Class(ClassBase):
         populate_by_name = True
 
 
-# ==================== 提問相關模型 ====================
+# ==================== 提問/作答紀錄相關模型 ====================
 
 class QuestionBase(BaseModel):
-    """提問基礎模型"""
+    """作答紀錄基礎模型"""
     course_id: str = Field(..., description="所屬課程ID")
     class_id: Optional[str] = Field(None, description="所屬班級ID")
     pseudonym: str = Field(..., description="去識別化後的使用者代號")
-    question_text: str = Field(..., description="提問內容")
-    status: QuestionStatus = Field(default=QuestionStatus.PENDING, description="提問狀態")
+    
+    # =========== 🔥 新增：學號欄位 ===========
+    student_id: Optional[str] = Field(None, description="學生學號")
+    # =======================================
+    
+    question_text: str = Field(..., description="作答內容")
+    
+    review_status: ReviewStatus = Field(default=ReviewStatus.PENDING, description="批閱狀態")
+    feedback: Optional[str] = Field(None, description="老師給予的批閱評語")
     
     # AI 分析結果
     cluster_id: Optional[str] = Field(None, description="AI 聚類ID")
@@ -134,10 +129,8 @@ class QuestionBase(BaseModel):
     ai_summary: Optional[str] = Field(None, description="AI 對問題的摘要或重述")
     sentiment_score: Optional[float] = Field(None, description="情緒分數 (-1 to 1)")
     
-    # 合併與回覆相關
-    merged_to_qa_id: Optional[str] = Field(None, description="合併至的 Q&A ID")
-    is_merged: bool = Field(default=False, description="是否已合併")
-    reply_to_qa_id: Optional[str] = Field(None, description="回覆特定 Q&A 的 ID (用於限時廣播)")
+    # 關聯 Q&A 任務
+    reply_to_qa_id: Optional[str] = Field(None, description="回覆特定 Q&A 的 ID")
     
     # 元資料
     original_message_id: Optional[str] = Field(None, description="Line 訊息ID")
@@ -145,23 +138,34 @@ class QuestionBase(BaseModel):
 
 
 class QuestionCreate(BaseModel):
-    """建立提問 (接收 Line Bot 輸入)"""
+    """建立作答 (接收 Line Bot 輸入)"""
     course_id: str
     class_id: Optional[str] = None
     line_user_id: str = Field(..., description="Line User ID (將被去識別化)")
+    
+    # 🔥 新增傳遞學號
+    student_id: Optional[str] = None
+    
     question_text: str
     original_message_id: Optional[str] = None
     reply_to_qa_id: Optional[str] = None
 
 
-class QuestionStatusUpdate(BaseModel):
-    """更新提問狀態"""
-    status: QuestionStatus = Field(..., description="新狀態")
-    rejection_reason: Optional[str] = Field(None, description="拒絕原因（狀態為 REJECTED 時使用）")
+class ReviewStatusUpdate(BaseModel):
+    """更新單筆批閱狀態與評語"""
+    review_status: ReviewStatus = Field(..., description="新批閱狀態")
+    feedback: Optional[str] = Field(None, description="給學生的批閱評語(可選)")
+
+
+class ReviewStatusBatchUpdate(BaseModel):
+    """批量更新多筆作答的批閱狀態"""
+    question_ids: List[str] = Field(..., description="待更新的作答紀錄ID列表")
+    review_status: ReviewStatus = Field(..., description="新批閱狀態")
+    feedback: Optional[str] = Field(None, description="給這些學生的統一批閱評語(可選)")
 
 
 class Question(QuestionBase):
-    """提問完整模型"""
+    """作答紀錄完整模型"""
     id: str = Field(alias="_id")
     created_at: datetime = Field(default_factory=datetime.utcnow)
     updated_at: datetime = Field(default_factory=datetime.utcnow)
@@ -173,29 +177,27 @@ class Question(QuestionBase):
 # ==================== Q&A 相關模型 ====================
 
 class QABase(BaseModel):
-    """Q&A 基礎模型"""
+    """Q&A 任務基礎模型"""
     course_id: str = Field(..., description="所屬課程ID")
     class_id: Optional[str] = Field(None, description="所屬班級ID (可為 None 代表全課程)")
     question: str = Field(..., description="問題內容")
-    answer: str = Field(..., description="回答內容")
     
-    # 相關提問
-    related_question_ids: List[str] = Field(default_factory=list, description="相關提問ID列表")
+    core_concept: str = Field(..., description="期望的核心觀念")
+    expected_misconceptions: Optional[str] = Field(None, description="預期的迷思概念或分析重點")
     
-    # 分類與標籤
     category: Optional[str] = Field(None, description="分類")
     tags: List[str] = Field(default_factory=list, description="標籤")
     
-    # 顯示控制
     is_published: bool = Field(default=False, description="是否發布")
     publish_date: Optional[datetime] = Field(None, description="發布時間")
     
-    # 作者資訊
     created_by: str = Field(..., description="建立者ID (教師/助教)")
 
     allow_replies: bool = Field(default=False, description="是否透過 LINE 開放學生限時回覆")
     duration_minutes: Optional[int] = Field(None, description="開放回覆的時長(分鐘)")
     expires_at: Optional[datetime] = Field(None, description="限時回覆截止時間")
+    
+    max_attempts: Optional[int] = Field(default=1, description="每位學生最大作答次數")
 
 
 class QACreate(BaseModel):
@@ -203,13 +205,17 @@ class QACreate(BaseModel):
     course_id: str
     class_id: Optional[str] = None
     question: str
-    answer: str
+    
+    core_concept: str
+    expected_misconceptions: Optional[str] = None
+    
     category: Optional[str] = None
     tags: List[str] = Field(default_factory=list)
     is_published: bool = False
     
     allow_replies: bool = False
     duration_minutes: Optional[int] = None
+    max_attempts: Optional[int] = 1
     created_by: str = Field("system", description="建立者ID")
 
 
@@ -232,18 +238,14 @@ class AnnouncementBase(BaseModel):
     title: str = Field(..., description="公告標題")
     content: str = Field(..., description="公告內容")
     
-    # 關聯的 Q&A
     related_qa_ids: List[str] = Field(default_factory=list, description="相關 Q&A ID列表")
     
-    # 發布控制
     is_published: bool = Field(default=False, description="是否發布")
     publish_date: Optional[datetime] = Field(None, description="發布時間")
     
-    # 發送至 Line
     sent_to_line: bool = Field(default=False, description="是否已發送至 Line")
     line_message_id: Optional[str] = Field(None, description="Line 訊息ID")
     
-    # 作者資訊
     created_by: str = Field(..., description="建立者ID (教師/助教)")
 
 
@@ -337,6 +339,11 @@ class LineMessageBase(BaseModel):
     """LINE 訊息基礎模型"""
     user_id: str = Field(..., description="LINE 使用者 ID")
     pseudonym: str = Field(..., description="去識別化後的使用者代號")
+    
+    # =========== 🔥 新增：學號欄位 ===========
+    student_id: Optional[str] = Field(None, description="學生學號")
+    # =======================================
+    
     message_type: LineMessageType = Field(..., description="訊息類型")
     direction: LineMessageDirection = Field(..., description="訊息方向")
     content: str = Field(..., description="訊息內容")
@@ -355,6 +362,10 @@ class LineMessageBase(BaseModel):
 class LineMessageCreate(BaseModel):
     """建立 LINE 訊息記錄"""
     user_id: str
+    
+    # 🔥 新增傳遞學號
+    student_id: Optional[str] = None
+    
     message_type: LineMessageType = LineMessageType.TEXT
     direction: LineMessageDirection
     content: str
@@ -380,10 +391,7 @@ class LineMessage(LineMessageBase):
 class ClusterBase(BaseModel):
     """AI 聚類主題模型"""
     course_id: str = Field(..., description="所屬課程ID")
-    
-    # =========== 🔥 新增：關聯至 Q&A 的 ID ===========
     qa_id: Optional[str] = Field(None, description="關聯的 Q&A 題目 ID，代表此群組是針對該題目的回答分類")
-    # ===============================================
     
     topic_label: str = Field(..., description="AI 生成的主題標籤 (例如：觀念完全正確、混淆某觀念)")
     summary: Optional[str] = Field(None, description="該主題的綜合摘要或批閱總結")
@@ -412,9 +420,6 @@ class ClusterUpdate(BaseModel):
 
 class ClusterGenerateRequest(BaseModel):
     course_id: str = Field(..., description="課程ID")
-    
-    # =========== 🔥 新增：觸發 AI 聚類時傳入的 Q&A ID ===========
     qa_id: Optional[str] = Field(None, description="指定要進行聚類的 Q&A 題目 ID")
-    # ========================================================
-    
     max_clusters: int = Field(default=5, ge=1, le=20, description="群組數量上限")
+    force_recluster: bool = Field(default=False, description="是否強制重新聚類 (將清除舊群組並重設作答標籤)")

@@ -1,13 +1,12 @@
 """
 資料匯出服務
-提供 CSV 格式的統計資料匯出功能
+提供 CSV 格式的統計資料與作答明細匯出功能
 """
 import csv
 import io
 from typing import List, Dict, Any, Optional
 from datetime import datetime
 from ..database import db
-from ..models.schemas import QuestionStatus
 from ..utils.datetime_helper import format_datetime
 
 
@@ -23,13 +22,13 @@ class ExportService:
         end_date: Optional[datetime] = None
     ) -> str:
         """
-        匯出提問資料為 CSV 格式 (包含 AI 分析欄位)
+        匯出學生作答明細資料為 CSV 格式 (包含 AI 分析欄位)
         """
         database = db.get_db()
         collection = database["questions"]
         
-        # 建立多維度查詢條件
-        query: Dict[str, Any] = {"course_id": course_id, "status": {"$ne": "DELETED"}}
+        # 建立多維度查詢條件 (已移除舊版的 status 過濾，因為現在是實體刪除)
+        query: Dict[str, Any] = {"course_id": course_id}
         
         if class_id:
             query["class_id"] = class_id
@@ -43,7 +42,9 @@ class ExportService:
             if start_date:
                 query["created_at"]["$gte"] = start_date
             if end_date:
-                query["created_at"]["$lte"] = end_date
+                # 將結束時間設定為當天的 23:59:59
+                adjusted_end = end_date.replace(hour=23, minute=59, second=59, microsecond=999999)
+                query["created_at"]["$lte"] = adjusted_end
         
         # 取得資料
         cursor = collection.find(query).sort("created_at", -1)
@@ -53,32 +54,28 @@ class ExportService:
         output = io.StringIO()
         writer = csv.writer(output)
         
-        # 寫入標題列
+        # 寫入標題列 (符合新版作答紀錄)
         writer.writerow([
-            "提問ID", "去識別化代號", "提問內容", "狀態", "AI聚類ID",
-            "難度分數", "難度等級", "關鍵字", "AI回答草稿", "AI摘要",
-            "情緒分數", "是否已合併", "合併至Q&A ID", "建立時間", "更新時間"
+            "作答紀錄ID", "所屬Q&A任務ID", "去識別化代號", "學生作答內容", 
+            "AI聚類ID", "難度分數", "難度等級", "關鍵字", 
+            "AI回答草稿", "AI摘要", "建立時間", "更新時間"
         ])
         
         # 寫入資料列
         for q in questions:
-            # 防呆：確保 keywords 不是 None，避免 join 報錯
             keywords = q.get("keywords") or []
             
             writer.writerow([
                 str(q["_id"]),
-                q.get("pseudonym", ""),
-                q.get("question_text", ""),
-                q.get("status", ""),
+                q.get("reply_to_qa_id", ""),
+                q.get("pseudonym", "匿名"),
+                q.get("question_text", ""), # 仍為 question_text 欄位
                 q.get("cluster_id", ""),
                 q.get("difficulty_score", ""),
                 q.get("difficulty_level", ""),
                 ", ".join(keywords),
                 q.get("ai_response_draft", ""),
                 q.get("ai_summary", ""),
-                q.get("sentiment_score", ""),
-                "是" if q.get("is_merged", False) else "否",
-                q.get("merged_to_qa_id", ""),
                 format_datetime(q.get("created_at")) if q.get("created_at") else "",
                 format_datetime(q.get("updated_at")) if q.get("updated_at") else ""
             ])
@@ -106,7 +103,7 @@ class ExportService:
         # 寫入標題
         writer.writerow([
             "聚類ID", "主題標籤 (Topic)", "綜合摘要 (Summary)", 
-            "包含提問數", "平均難度", "關鍵字", "是否人工鎖定"
+            "包含回覆數", "平均難度", "關鍵字", "是否人工鎖定"
         ])
         
         # 處理資料
@@ -127,22 +124,33 @@ class ExportService:
         
         return csv_content
 
-    # =========== 🔥 核心升級：匯出 Q&A 時包含學生回答 ===========
+
     async def export_qas_to_csv(
         self,
         course_id: str,
-        class_id: Optional[str] = None
+        class_id: Optional[str] = None,
+        start_date: Optional[datetime] = None, # 🔥 新增時間參數
+        end_date: Optional[datetime] = None    # 🔥 新增時間參數
     ) -> str:
         """
-        匯出 Q&A 資料為 CSV 格式 (包含學生在限時互動期間的作答)
+        匯出 Q&A 任務資料為 CSV 格式 (包含學生作答紀錄)
         """
         database = db.get_db()
         qa_collection = database["qas"]
-        question_collection = database["questions"] # 引入 questions 表來撈取學生作答
+        question_collection = database["questions"] 
         
         query: Dict[str, Any] = {"course_id": course_id}
         if class_id:
             query["$or"] = [{"class_id": class_id}, {"class_id": None}]
+
+        if start_date or end_date:
+            query["created_at"] = {}
+            if start_date:
+                query["created_at"]["$gte"] = start_date
+            if end_date:
+                # 將結束時間設定為當天的 23:59:59
+                adjusted_end = end_date.replace(hour=23, minute=59, second=59, microsecond=999999)
+                query["created_at"]["$lte"] = adjusted_end
         
         cursor = qa_collection.find(query).sort("created_at", -1)
         qas = await cursor.to_list(length=None)
@@ -150,9 +158,8 @@ class ExportService:
         output = io.StringIO()
         writer = csv.writer(output)
         
-        # 🔥 修改標題列，移除用處不大的「相關提問數量」，新增「學生回覆內容」
         writer.writerow([
-            "Q&A ID", "問題", "標準答案", "分類", "標籤", "是否發布",
+            "任務 ID", "任務問題", "標準答案/批閱基準", "分類", "標籤", "是否發布",
             "發布時間", "建立者", "建立時間", "學生回覆內容" 
         ])
         
@@ -160,7 +167,7 @@ class ExportService:
             qa_id_str = str(qa["_id"])
             tags = qa.get("tags") or []
             
-            # 🔥 去 questions 集合中尋找針對此 Q&A 的學生回覆
+            # 去 questions 集合中尋找針對此 Q&A 的學生回覆
             replies_cursor = question_collection.find({"reply_to_qa_id": qa_id_str}).sort("created_at", 1)
             replies = await replies_cursor.to_list(length=None)
             
@@ -189,35 +196,42 @@ class ExportService:
                 format_datetime(qa.get("publish_date")) if qa.get("publish_date") else "",
                 qa.get("created_by", ""),
                 format_datetime(qa.get("created_at")) if qa.get("created_at") else "",
-                replies_str # 🔥 將組合好的回覆字串塞入最後一個欄位
+                replies_str 
             ])
         
         csv_content = output.getvalue()
         output.close()
         return csv_content
-    # ==========================================================
+
 
     async def export_statistics_to_csv(
         self,
         course_id: str,
-        class_id: Optional[str] = None
+        class_id: Optional[str] = None,
+        start_date: Optional[datetime] = None, # 🔥 新增時間參數
+        end_date: Optional[datetime] = None    # 🔥 新增時間參數
     ) -> str:
         """
-        匯出統計資料為 CSV 格式
+        匯出任務成效統計資料為 CSV 格式
         """
         database = db.get_db()
         collection = database["questions"]
         
-        query: Dict[str, Any] = {"course_id": course_id, "status": {"$ne": "DELETED"}}
+        query: Dict[str, Any] = {"course_id": course_id}
         if class_id:
             query["class_id"] = class_id
+
+        if start_date or end_date:
+            query["created_at"] = {}
+            if start_date:
+                query["created_at"]["$gte"] = start_date
+            if end_date:
+                # 將結束時間設定為當天的 23:59:59
+                adjusted_end = end_date.replace(hour=23, minute=59, second=59, microsecond=999999)
+                query["created_at"]["$lte"] = adjusted_end
         
-        # 1. 統計各狀態
-        status_pipeline = [
-            {"$match": query},
-            {"$group": {"_id": "$status", "count": {"$sum": 1}}}
-        ]
-        status_stats = await collection.aggregate(status_pipeline).to_list(length=None)
+        # 1. 取得總作答數
+        total_replies = await collection.count_documents(query)
         
         # 2. 統計難度分布
         difficulty_pipeline = [
@@ -230,16 +244,19 @@ class ExportService:
         output = io.StringIO()
         writer = csv.writer(output)
         
-        writer.writerow(["=== 提問狀態統計 ==="])
-        writer.writerow(["狀態", "數量"])
-        for stat in status_stats:
-            writer.writerow([stat["_id"], stat["count"]])
+        writer.writerow(["=== 任務作答總覽 ==="])
+        writer.writerow(["總收集回覆數", total_replies])
         writer.writerow([])
         
-        writer.writerow(["=== 難度分布統計 ==="])
+        writer.writerow(["=== 學生學習難度分布 ==="])
         writer.writerow(["難度等級", "數量"])
         for stat in difficulty_stats:
-            writer.writerow([stat["_id"], stat["count"]])
+            diff_label = stat["_id"]
+            if diff_label == "EASY": diff_label = "簡單"
+            elif diff_label == "MEDIUM": diff_label = "中等"
+            elif diff_label == "HARD": diff_label = "困難"
+            
+            writer.writerow([diff_label, stat["count"]])
         
         csv_content = output.getvalue()
         output.close()

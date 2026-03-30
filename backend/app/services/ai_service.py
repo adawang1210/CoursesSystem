@@ -120,16 +120,18 @@ class AIService:
         result = self._call_ai_api(messages, temperature=0.7)
         return result if result else "無法生成草稿"
 
-    # =========== 🔥 核心升級：針對 Q&A 回答的批閱式聚類 ===========
+    # =========== 🔥 核心升級：診斷式教育分析聚類 ===========
     def perform_qa_answer_clustering(
         self, 
         student_answers: List[str], 
         teacher_question: str,
-        standard_answer: str,
-        max_clusters: int = 5
+        core_concept: str,
+        expected_misconceptions: Optional[str] = None,
+        max_clusters: int = 5,
+        existing_topics: List[str] = None
     ) -> Dict[str, Any]:
         """
-        [全新功能] 根據老師的題目與標準答案，批閱並分類學生的回答
+        [升級功能] 根據老師期望的核心觀念與預期迷思，深度診斷並分類學生的理解狀態
         """
         if not student_answers:
             return {"clusters": []}
@@ -137,26 +139,38 @@ class AIService:
         # 1. 幫學生的回答加上索引編號
         indexed_text = "\n".join([f"ID_{i}: {ans[:300]}" for i, ans in enumerate(student_answers)])
         
-        # 2. 設計批閱與分群專用的 Prompt
+        # 2. 處理額外的動態字串 (現有群組與預期迷思)
+        existing_topics_str = ""
+        if existing_topics:
+            topics_joined = ", ".join([f'"{t}"' for t in existing_topics])
+            existing_topics_str = f"\n【現有自訂群組】\n{topics_joined}\n(請務必優先將符合的回答歸入這些群組中，並嚴格保持「群組標籤」名稱完全一致)\n"
+            
+        misconceptions_str = ""
+        if expected_misconceptions:
+            misconceptions_str = f"- 老師預期探測的迷思/分析重點：{expected_misconceptions}\n"
+        
+        # 3. 設計診斷分析專用的 Prompt
         system_prompt = f"""
-        你是一位專業的大學課程助教。老師出了一道課堂問答題，並提供了標準答案。
-        請根據「題目」與「標準答案」，批閱以下學生的作答，並將具有「相似理解程度」、「相同迷思概念」或「相似錯誤」的回答進行分群聚類。
+        你是一位專業的「教育診斷分析師」。老師出了一道探究型的問答題，並提供了期望學生掌握的「核心觀念」。
+        你的任務不是單純批改對錯，而是要「深度診斷」以下學生的作答，將具有「相似理解類型」、「相同認知盲點」或「相似迷思」的回答進行分群聚類。
 
-        【題目資訊】
+        【教學與診斷資訊】
         - 老師的提問：{teacher_question}
-        - 期望的標準答案：{standard_answer}
-
+        - 期望的核心觀念：{core_concept}
+        {misconceptions_str}
+        {existing_topics_str}
+        
         【任務規則】
-        1. **概念分群**：請依據學生的理解程度分類（例如：「觀念完全正確」、「部分正確：缺少XX概念」、「嚴重迷思：誤解YY」等）。
-        2. **群組數量**：請將學生的回答分成 1 到 {max_clusters} 個群組。
-        3. **強制覆蓋 (重要)**：列表中的「每一個」學生的回答都必須被分配到某個群組中 (Index 0 到 {len(student_answers)-1})，絕不能遺漏任何一個學生。
+        1. **診斷導向分群**：請跳脫死板的對/錯，分類標籤必須精準描述學生的「認知狀態」或「思考特徵」。（例如：「具備完整因果推論」、「混淆了A與B的概念」、「只背誦專有名詞未理解本質」、「依賴直覺經驗取代科學概念」等）。
+        2. **群組數量**：請將學生的回答分成合適的群組（包含現有自訂群組與你新增的群組），總群組數請盡量控制在 {max_clusters} 個以內。
+        3. **強制覆蓋 (重要)**：列表中的「每一個」學生的回答都必須被分配到某個群組中 (Index 0 到 {len(student_answers)-1})，絕不能遺漏。
         
         4. **格式要求**：請回傳嚴格的 JSON 格式，格式如下：
         {{
             "clusters": [
                 {{
-                    "topic_label": "群組標籤 (例如：觀念完全正確 / 忽略了成本考量)",
-                    "summary": "此群組的批閱總結 (簡述這群學生的共同理解特徵或盲點)",
+                    "topic_label": "群組標籤 (例如：具備完整因果推論 / 混淆了供需法則的因果)",
+                    "summary": "此群組的診斷總結 (詳細說明這群學生目前的理解走到哪一步，以及共同的盲點或迷思是什麼)",
                     "question_indices": [0, 2, 5] // 對應原始作答列表的索引 (整數)
                 }}
             ]
@@ -165,11 +179,11 @@ class AIService:
         
         messages = [
             {"role": "system", "content": system_prompt},
-            {"role": "user", "content": f"請對以下學生的回答進行批閱與分群：\n{indexed_text}"}
+            {"role": "user", "content": f"請對以下學生的回答進行教育診斷與分群：\n{indexed_text}"}
         ]
 
         # 呼叫 LLM
-        result = self._call_ai_api(messages, json_mode=True, temperature=0.5) # 稍微調低溫度以求準確分類
+        result = self._call_ai_api(messages, json_mode=True, temperature=0.5) 
         
         if not result:
             return {"clusters": []}

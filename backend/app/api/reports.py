@@ -5,7 +5,7 @@ from fastapi import APIRouter, HTTPException, Query, Response
 from typing import Optional
 from datetime import datetime
 from ..services.export_service import export_service
-from ..database import db  # 🔥 新增：為了能在 API 中直接查詢資料庫進行統計
+from ..database import db  
 
 router = APIRouter(prefix="/reports", tags=["reports"])
 
@@ -17,29 +17,25 @@ router = APIRouter(prefix="/reports", tags=["reports"])
 async def get_statistics(course_id: str = Query(..., description="課程ID")):
     """
     供前端統計儀表板 (Dashboard) 使用的聚合資料
-    包含總提問數、各狀態數量、平均難度等
+    包含總作答數、平均難度與難度分佈
     """
     try:
         database = db.get_db()
         questions_coll = database["questions"]
         
-        # 1. 基本計數
-        total = await questions_coll.count_documents({"course_id": course_id, "status": {"$ne": "DELETED"}})
-        pending = await questions_coll.count_documents({"course_id": course_id, "status": "PENDING"})
-        approved = await questions_coll.count_documents({"course_id": course_id, "status": "APPROVED"})
+        # =========== 🔥 修正：只撈取有綁定 Q&A 任務的有效作答 ===========
+        base_query = {
+            "course_id": course_id, 
+            "reply_to_qa_id": {"$ne": None} # 過濾掉舊版一般提問
+        }
+        # ==============================================================
         
-        # 2. 狀態分布
-        status_pipeline = [
-            {"$match": {"course_id": course_id, "status": {"$ne": "DELETED"}}},
-            {"$group": {"_id": "$status", "count": {"$sum": 1}}}
-        ]
-        status_dist = {}
-        async for doc in questions_coll.aggregate(status_pipeline):
-            status_dist[doc["_id"]] = doc["count"]
-            
-        # 3. 難度分布與平均難度分數
+        # 1. 基本計數
+        total = await questions_coll.count_documents(base_query)
+        
+        # 2. 難度分布與平均難度分數
         diff_pipeline = [
-            {"$match": {"course_id": course_id, "status": {"$ne": "DELETED"}}},
+            {"$match": base_query},
             {"$group": {
                 "_id": {"$toUpper": "$difficulty_level"},
                 "count": {"$sum": 1},
@@ -67,10 +63,7 @@ async def get_statistics(course_id: str = Query(..., description="課程ID")):
             "success": True,
             "data": {
                 "total_questions": total,
-                "pending_questions": pending,
-                "approved_questions": approved,
                 "avg_difficulty_score": avg_difficulty,
-                "status_distribution": status_dist,
                 "difficulty_distribution": {
                     "easy": difficulty_dist["EASY"],
                     "medium": difficulty_dist["MEDIUM"],
@@ -91,8 +84,13 @@ async def get_clusters_summary(course_id: str = Query(..., description="課程ID
         database = db.get_db()
         clusters_coll = database["clusters"]
         
-        # 取出該課程底下，包含最多問題的前 10 個主題
-        cursor = clusters_coll.find({"course_id": course_id}).sort("question_count", -1).limit(10)
+        # =========== 🔥 修正：只撈取有綁定 Q&A 任務的聚類群組 ===========
+        cursor = clusters_coll.find({
+            "course_id": course_id,
+            "qa_id": {"$ne": None} # 過濾掉舊版一般提問的聚類
+        }).sort("question_count", -1).limit(10)
+        # ==============================================================
+        
         clusters = await cursor.to_list(length=10)
         
         for c in clusters:
@@ -152,10 +150,12 @@ async def export_clusters_csv(course_id: str = Query(..., description="課程ID"
 @router.get("/export/qas", summary="匯出 Q&A 資料 CSV")
 async def export_qas_csv(
     course_id: str = Query(..., description="課程ID"),
-    class_id: Optional[str] = Query(None, description="班級ID")
+    class_id: Optional[str] = Query(None, description="班級ID"),
+    start_date: Optional[datetime] = Query(None, description="開始日期"), 
+    end_date: Optional[datetime] = Query(None, description="結束日期")    
 ):
     try:
-        csv_content = await export_service.export_qas_to_csv(course_id=course_id, class_id=class_id)
+        csv_content = await export_service.export_qas_to_csv(course_id, class_id, start_date, end_date)
         filename = f"qas_{course_id}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
         return Response(
             content=csv_content.encode('utf-8-sig'),
@@ -168,10 +168,12 @@ async def export_qas_csv(
 @router.get("/export/statistics", summary="匯出統計資料 CSV")
 async def export_statistics_csv(
     course_id: str = Query(..., description="課程ID"),
-    class_id: Optional[str] = Query(None, description="班級ID")
+    class_id: Optional[str] = Query(None, description="班級ID"),
+    start_date: Optional[datetime] = Query(None, description="開始日期"), 
+    end_date: Optional[datetime] = Query(None, description="結束日期")    
 ):
     try:
-        csv_content = await export_service.export_statistics_to_csv(course_id=course_id, class_id=class_id)
+        csv_content = await export_service.export_statistics_to_csv(course_id, class_id, start_date, end_date)
         filename = f"statistics_{course_id}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
         return Response(
             content=csv_content.encode('utf-8-sig'),

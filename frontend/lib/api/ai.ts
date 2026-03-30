@@ -6,7 +6,7 @@ import { apiClient } from "@/lib/api-client";
 export interface ClusterSummary {
   _id?: string;               // MongoDB 的 ID
   course_id: string;          // 課程 ID
-  qa_id?: string;             // 🔥 新增：關聯的 Q&A 題目 ID
+  qa_id?: string;             // 關聯的 Q&A 題目 ID
   topic_label: string;        // AI 生成的主題標籤
   summary?: string;           // 該主題的綜合摘要 (AI 生成的解釋)
   keywords: string[];         // 對應後端的 keywords
@@ -37,7 +37,6 @@ export const aiApi = {
     console.log(`[aiApi] 正在抓取課程 ${courseId} 的聚類資料 (qaId: ${qaId || '一般提問'})...`); 
     
     try {
-      // 🔥 新增：若有 qaId 則組裝 query string
       const params = qaId ? new URLSearchParams({ qa_id: qaId }) : undefined;
       const url = params ? `/ai/clusters/${courseId}?${params.toString()}` : `/ai/clusters/${courseId}`;
 
@@ -52,18 +51,26 @@ export const aiApi = {
     }
   },
 
+  // =========== 🔥 核心修改：加入 forceRecluster 參數 ===========
   /**
    * [手動觸發] 執行課程的聚類分析任務
    * @param courseId 課程 ID
    * @param maxClusters 最大分群數
    * @param qaId (選填) 指定 Q&A ID，若傳入則觸發「批閱模式」
+   * @param forceRecluster (選填) 是否強制重新聚類 (清除舊群組並洗白作答標籤)
    */
-  runClustering: async (courseId: string, maxClusters: number = 5, qaId?: string): Promise<boolean> => {
+  runClustering: async (
+    courseId: string, 
+    maxClusters: number = 5, 
+    qaId?: string,
+    forceRecluster: boolean = false 
+  ): Promise<boolean> => {
     try {
       await apiClient.post(`/ai/clusters/generate`, { 
         course_id: courseId, 
         max_clusters: maxClusters,
-        qa_id: qaId // 🔥 新增：傳遞 qa_id 給後端觸發批閱雙引擎
+        qa_id: qaId,
+        force_recluster: forceRecluster // 🔥 將指令傳給後端
       });
       return true;
     } catch (error) {
@@ -71,6 +78,7 @@ export const aiApi = {
       return false;
     }
   },
+  // ==========================================================
 
   /**
    * [手動觸發] 為特定問題生成/重寫 AI 回覆草稿
@@ -122,7 +130,7 @@ export const aiApi = {
       const response = await apiClient.post(`/ai/clusters/manual`, { 
         course_id: courseId, 
         topic_label: topicLabel,
-        qa_id: qaId // 🔥 新增：讓手動分類也能綁定 Q&A
+        qa_id: qaId 
       });
       return response as APIResponse<any>;
     } catch (error) {

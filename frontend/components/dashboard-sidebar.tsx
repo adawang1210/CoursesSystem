@@ -5,7 +5,6 @@ import { cn } from "@/lib/utils";
 import {
   LayoutDashboard,
   BookOpen,
-  ClipboardList,
   MessageSquare,
   Megaphone,
   BarChart3,
@@ -27,18 +26,13 @@ const sidebarItems = [
     href: "/dashboard/courses",
   },
   {
-    id: "questions",
-    label: "提問審核",
-    icon: ClipboardList,
-    href: "/dashboard/questions",
-  },
-  {
     id: "clustering",
     label: "AI 聚類",
     icon: Network,
     href: "/dashboard/clustering",
   },
-  { id: "qa", 
+  { 
+    id: "qa", 
     label: "Q&A 管理", 
     icon: MessageSquare, 
     href: "/dashboard/qa" 

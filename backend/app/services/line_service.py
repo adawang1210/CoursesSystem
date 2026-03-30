@@ -67,7 +67,6 @@ class LineService:
 
         text = f"📢 【課堂 Q&A 推播】\n\n❓ 問題：\n{qa_data.get('question')}"
         
-        # =========== 🔥 修改 1：區分「限時互動」與「不限時互動」的推播文案 ===========
         if qa_data.get("allow_replies"):
             if qa_data.get("duration_minutes"):
                 text += f"\n\n⏳ 老師已開啟限時任務！\n請在 {qa_data.get('duration_minutes')} 分鐘內直接在此回覆您的想法或答案。"
@@ -75,7 +74,6 @@ class LineService:
                 text += f"\n\n📝 老師已發布課後互動任務！\n請直接在此回覆您的想法或答案（本任務不限時，直到老師關閉為止）。"
         else:
             text += f"\n\n💡 參考解答：\n{qa_data.get('answer')}"
-        # ======================================================================
         
         batch_size = 500
         try:
@@ -134,13 +132,15 @@ class LineService:
 
     async def handle_follow(self, event: FollowEvent):
         """處理加入好友事件"""
+        # =========== 🔥 修改：更新歡迎訊息，要求綁定學號 ===========
         welcome_msg = (
             "👋 歡迎使用 AI 跨領域教學輔助機器人！\n\n"
-            "請先輸入「綁定 [課程代碼]」來加入您的課程。\n"
-            "例如：「綁定 65d4a1b2c3d4e5f6g7h8i9j0」\n"
+            "請先輸入「綁定 [課程代碼] [學號]」來加入您的課程。\n"
+            "例如：「綁定 65d4a1b2c 111400000」\n"
             "（請向您的授課教師索取專屬課程代碼）\n\n"
-            "💡 綁定成功後，您在這裡發送的所有問題，都會以「匿名」的方式收集給老師，請放心且大膽地提問喔！"
+            "💡 綁定成功後，您在這裡發送的問題將會連結您的學號，以便老師給分喔！"
         )
+        # ========================================================
         await self._reply_text(event.reply_token, welcome_msg)
 
     async def handle_postback(self, event: PostbackEvent):
@@ -180,12 +180,17 @@ class LineService:
     async def _handle_bind_course(self, user_id: str, message_text: str, reply_token: str):
         """處理綁定課程邏輯"""
         database = db.get_db()
-        parts = message_text.split(" ", 1)
-        if len(parts) < 2:
-            await self._reply_text(reply_token, "⚠️ 格式錯誤。請輸入「綁定 [課程代碼]」。")
+        
+        # =========== 🔥 修改：解析出「課程代碼」與「學號」 ===========
+        parts = message_text.split()
+        if len(parts) < 3:
+            await self._reply_text(reply_token, "⚠️ 格式錯誤。請輸入「綁定 [課程代碼] [學號]」。\n例如：綁定 113A 111400000")
             return
             
         course_code = parts[1].strip()
+        student_id = parts[2].strip()
+        # ========================================================
+        
         course = None
         try:
             course = await database["courses"].find_one({"_id": ObjectId(course_code)})
@@ -196,26 +201,35 @@ class LineService:
             await self._reply_text(reply_token, f"❌ 找不到代碼為「{course_code}」的課程。請向助教或老師確認正確的代碼喔！")
             return
 
+        # =========== 🔥 修改：將學號存入 line_users ===========
         await database["line_users"].update_one(
             {"user_id": user_id},
             {"$set": {
                 "user_id": user_id,
                 "current_course_id": str(course["_id"]),
                 "current_course_name": course["course_name"],
+                "student_id": student_id,  # 新增記錄學號
                 "updated_at": datetime.utcnow()
             }},
             upsert=True
         )
 
-        reply_msg = f"✅ 綁定成功！\n您已成功加入「{course['course_name']}」。\n\n現在起，您可以直接把不懂的地方打字傳上來，系統會自動幫您記錄喔！"
+        reply_msg = f"✅ 綁定成功！\n您已成功以學號「{student_id}」加入「{course['course_name']}」。\n\n現在起，您可以直接把答案打字傳上來，系統會自動幫您記錄喔！"
+        # ===================================================
         await self._reply_text(reply_token, reply_msg)
 
     async def _handle_unbind_course(self, user_id: str, reply_token: str):
         """處理解除綁定邏輯"""
         database = db.get_db()
+        # 🔥 修改：一併清空學號
         await database["line_users"].update_one(
             {"user_id": user_id},
-            {"$set": {"current_course_id": None, "current_course_name": None, "updated_at": datetime.utcnow()}}
+            {"$set": {
+                "current_course_id": None, 
+                "current_course_name": None, 
+                "student_id": None,
+                "updated_at": datetime.utcnow()
+            }}
         )
         await self._reply_text(reply_token, "👋 已為您解除綁定。若有其他課程的問題，請重新輸入綁定指令。")
 
@@ -226,13 +240,15 @@ class LineService:
         user_data = await database["line_users"].find_one({"user_id": user_id})
         
         if not user_data or not user_data.get("current_course_id"):
-            await self._reply_text(reply_token, "⚠️ 您尚未綁定任何課程！\n請先輸入「綁定 [課程代碼]」來告訴我您要參與哪堂課。")
+            await self._reply_text(reply_token, "⚠️ 您尚未綁定任何課程！\n請先輸入「綁定 [課程代碼] [學號]」來告訴我您要參與哪堂課。")
             return
 
         course_id = user_data["current_course_id"]
+        # 🔥 抓出學生的學號
+        student_id = user_data.get("student_id")
+        
         now = datetime.utcnow()
         
-        # =========== 🔥 修改 2：將 $or 加入查詢，允許 expires_at 為 None (代表不限時) ===========
         active_qa = await database["qas"].find_one({
             "course_id": course_id,
             "allow_replies": True,
@@ -241,7 +257,6 @@ class LineService:
                 {"expires_at": {"$gt": now}}
             ]
         }, sort=[("created_at", -1)])
-        # ==============================================================================
         
         if not active_qa:
             await self._reply_text(reply_token, "ℹ️ 目前沒有開放中的課後 Q&A 任務喔！\n請等候老師或助教發布本週的問題後，再直接於此回覆您的答案。")
@@ -249,21 +264,14 @@ class LineService:
             
         reply_to_qa_id = str(active_qa["_id"])
         
-        # 防重複作答檢查邏輯
-        existing_reply = await database["questions"].find_one({
-            "reply_to_qa_id": reply_to_qa_id,
-            "pseudonym": pseudonym 
-        })
-        
-        if existing_reply:
-            await self._reply_text(reply_token, "⚠️ 您已經提交過這題的答案囉！請耐心等候老師批閱。")
-            return
+        # ⚠️ 注意：此處已移除舊版的「防重複作答檢查」，全權交由 question_service 裡的 max_attempts 邏輯來處理防呆！
 
         # 寫入資料庫
         try:
             new_q_data = QuestionCreate(
                 course_id=course_id,
                 line_user_id=user_id,
+                student_id=student_id, # 🔥 傳入學號給服務層
                 question_text=message_text,
                 original_message_id=message_id,
                 reply_to_qa_id=reply_to_qa_id 
@@ -273,6 +281,7 @@ class LineService:
             await self._reply_text(reply_token, "✅ 已成功收到您的作答！")
             
         except ValueError as ve:
+            # 這裡會攔截到超過 max_attempts 次數的錯誤，並回覆給學生
             await self._reply_text(reply_token, f"❌ 操作失敗：{str(ve)}")
         except Exception as e:
             print(f"❌ 寫入失敗: {str(e)}")

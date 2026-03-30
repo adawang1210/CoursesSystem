@@ -23,7 +23,7 @@ import {
   AlertCircle,
   Copy,
   CheckCircle2,
-  Link as LinkIcon, // 🔥 新增 icon
+  Link as LinkIcon, 
 } from "lucide-react";
 import {
   getLineConfig,
@@ -33,8 +33,8 @@ import {
   getLineMessages,
   getMessageStats,
   getLineUsers,
-  coursesApi, // 🔥 新增：引入課程 API
-  type Course, // 🔥 新增：引入課程型別
+  coursesApi, 
+  type Course, 
   type LineMessage as ApiLineMessage,
   type LineUser,
 } from "@/lib/api";
@@ -72,10 +72,16 @@ interface LineBot {
   lastSync: string;
 }
 
+// 🔥 新增一個處理時間的小函式，確保時間字串結尾有 Z (代表 UTC)
+const ensureUTC = (dateStr?: string) => {
+  if (!dateStr) return undefined;
+  return dateStr.endsWith('Z') ? dateStr : `${dateStr}Z`;
+};
+
 export default function LineIntegrationPage() {
   const [messages, setMessages] = useState<LineMessage[]>([]);
   const [users, setUsers] = useState<LineUser[]>([]);
-  const [courses, setCourses] = useState<Course[]>([]); // 🔥 新增：課程列表狀態
+  const [courses, setCourses] = useState<Course[]>([]); 
   const [selectedUser, setSelectedUser] = useState<LineUser | null>(null);
   const [bot, setBot] = useState<LineBot>({
     channelId: "",
@@ -102,17 +108,15 @@ export default function LineIntegrationPage() {
   const [userLabels, setUserLabels] = useState<Record<string, string>>({});
   const { toast } = useToast();
 
-  // 載入 LINE Bot 配置和狀態
   useEffect(() => {
     loadLineConfig();
     loadWebhookInfo();
     loadStats();
     loadUsers();
     loadMessageStats();
-    loadCourses(); // 🔥 新增：載入課程
+    loadCourses(); 
   }, []);
 
-  // 當選中使用者改變時，載入該使用者的訊息
   useEffect(() => {
     if (selectedUser) {
       loadMessages(selectedUser.user_id);
@@ -127,7 +131,6 @@ export default function LineIntegrationPage() {
       const config = await getLineConfig();
       setIsConfigured(config.is_configured);
 
-      // 如果有 Bot 資訊，更新 Bot 狀態
       if (config.bot_info) {
         setBot((prev) => ({
           channelId: config.bot_info!.user_id,
@@ -170,7 +173,6 @@ export default function LineIntegrationPage() {
       setEditedWebhookUrl(info.webhook_url);
       setWebhookInstructions(info.instructions);
 
-      // 如果不是 HTTPS，顯示警告
       if (!info.is_https) {
         toast({
           title: "提示",
@@ -187,7 +189,6 @@ export default function LineIntegrationPage() {
   const loadCourses = async () => {
     try {
       const data = await coursesApi.getAll();
-      // 只顯示啟用中的課程
       setCourses(data.filter((c) => c.is_active));
     } catch (error) {
       console.error("載入課程失敗:", error);
@@ -246,7 +247,6 @@ export default function LineIntegrationPage() {
   const loadMessages = async (userId?: string) => {
     try {
       const data = await getLineMessages(50, 0, undefined, userId);
-      // 轉換 API 訊息格式為前端格式
       const convertedMessages: LineMessage[] = data.messages.map((msg) => ({
         id: msg._id,
         sender:
@@ -254,7 +254,8 @@ export default function LineIntegrationPage() {
             ? getLabelForUser(msg.user_id, msg.pseudonym)
             : "系統",
         content: msg.content,
-        timestamp: new Date(msg.created_at).toLocaleString("zh-TW", {
+        // 🔥 修改：利用 ensureUTC 保證 JS 會把它當作 UTC 轉換，進而+8小時變成台灣時間
+        timestamp: new Date(ensureUTC(msg.created_at)!).toLocaleString("zh-TW", {
           year: "numeric",
           month: "2-digit",
           day: "2-digit",
@@ -273,7 +274,6 @@ export default function LineIntegrationPage() {
     try {
       const data = await getMessageStats(7);
 
-      // 轉換訊息統計資料
       const formattedMessageStats = data.daily_message_stats.map((stat) => {
         const date = new Date(stat.date);
         return {
@@ -285,7 +285,6 @@ export default function LineIntegrationPage() {
       });
       setMessageStats(formattedMessageStats);
 
-      // 轉換每日活動統計
       const dates = Object.keys(data.daily_user_stats).sort();
       const weekDays = ["週日", "週一", "週二", "週三", "週四", "週五", "週六"];
       const formattedDailyStats = dates.map((dateStr) => {
@@ -308,7 +307,6 @@ export default function LineIntegrationPage() {
       setDailyStats(formattedDailyStats);
     } catch (error) {
       console.error("載入訊息統計失敗:", error);
-      // 如果沒有資料，設定空陣列
       setMessageStats([]);
       setDailyStats([]);
     }
@@ -348,7 +346,7 @@ export default function LineIntegrationPage() {
     navigator.clipboard.writeText(code);
     toast({
       title: "已複製",
-      description: `綁定指令「${code}」已複製`,
+      description: `綁定指令已複製，請提醒學生於後方加上學號`,
     });
   };
 
@@ -363,15 +361,6 @@ export default function LineIntegrationPage() {
       };
       setMessages([...messages, message]);
       setNewMessage("");
-    }
-  };
-
-  const handleConnect = () => {
-    if (channelToken) {
-      setBot({ ...bot, isConnected: true });
-      setShowTokenForm(false);
-      setChannelToken("");
-      alert("Line Bot 已成功連接");
     }
   };
 
@@ -413,7 +402,6 @@ export default function LineIntegrationPage() {
         </div>
       </div>
 
-      {/* Configuration Info */}
       {showTokenForm && (
         <Card className="bg-secondary/50 border-primary/20 mb-6">
           <CardHeader>
@@ -544,7 +532,6 @@ export default function LineIntegrationPage() {
         </Card>
       )}
 
-      {/* Connection Status */}
       <Card
         className={`mb-8 ${
           bot.isConnected
@@ -597,7 +584,6 @@ export default function LineIntegrationPage() {
 
       {bot.isConnected && (
         <>
-          {/* 🔥 新增：課程綁定指引區塊 */}
           <Card className="mb-8 border-primary/20 shadow-sm">
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
@@ -605,7 +591,7 @@ export default function LineIntegrationPage() {
                 課程綁定指引
               </CardTitle>
               <p className="text-sm text-muted-foreground">
-                請將以下「綁定指令」提供給學生。學生加入 LINE Bot 後輸入指令，即可將帳號與該課程連結。
+                請將以下「綁定指令」提供給學生。學生加入 LINE Bot 後輸入指令（請記得於後方加上自己的學號），即可將帳號與該課程連結。
               </p>
             </CardHeader>
             <CardContent>
@@ -624,13 +610,13 @@ export default function LineIntegrationPage() {
                       </div>
                       <div className="flex items-center gap-2 bg-secondary/50 p-2 rounded border border-border/50">
                         <code className="text-sm font-mono flex-1 text-primary truncate">
-                          綁定 {course._id}
+                          綁定 {course._id} [您的學號]
                         </code>
                         <Button
                           variant="ghost"
                           size="icon"
                           className="h-8 w-8 hover:bg-white hover:text-green-600"
-                          onClick={() => handleCopyCode(`綁定 ${course._id}`)}
+                          onClick={() => handleCopyCode(`綁定 ${course._id} `)}
                           title="複製指令"
                         >
                           <Copy className="w-4 h-4" />
@@ -648,7 +634,6 @@ export default function LineIntegrationPage() {
             </CardContent>
           </Card>
 
-          {/* Message Statistics */}
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
             <Card>
               <CardHeader>
@@ -734,9 +719,10 @@ export default function LineIntegrationPage() {
             </CardHeader>
             <CardContent>
               <div className="grid grid-cols-12 gap-4 h-[600px]">
+                
                 {/* User List Sidebar */}
-                <div className="col-span-4 border-r pr-4 overflow-y-auto">
-                  <div className="mb-4">
+                <div className="col-span-4 border-r pr-4 h-full overflow-y-auto">
+                  <div className="mb-4 shrink-0">
                     <h3 className="font-semibold mb-2 flex items-center justify-between">
                       <span>使用者列表</span>
                       <span className="text-xs text-muted-foreground">
@@ -779,9 +765,8 @@ export default function LineIntegrationPage() {
                             </span>
                             {user.last_message_time && (
                               <span className="text-xs">
-                                {new Date(
-                                  user.last_message_time
-                                ).toLocaleDateString("zh-TW", {
+                                {/* 🔥 修改：確保側邊欄使用者最後訊息時間為 UTC 解析 */}
+                                {new Date(ensureUTC(user.last_message_time)!).toLocaleDateString("zh-TW", {
                                   month: "2-digit",
                                   day: "2-digit",
                                   hour: "2-digit",
@@ -801,9 +786,10 @@ export default function LineIntegrationPage() {
                 </div>
 
                 {/* Chat Area */}
-                <div className="col-span-8 flex flex-col">
+                <div className="col-span-8 flex flex-col h-full overflow-hidden">
+                  
                   {/* Chat Header */}
-                  <div className="mb-4 pb-3 border-b">
+                  <div className="mb-4 pb-3 border-b shrink-0">
                     <h3 className="font-semibold">
                       {selectedUser
                         ? `與 ${getLabelForUser(
@@ -820,7 +806,7 @@ export default function LineIntegrationPage() {
                   </div>
 
                   {/* Messages */}
-                  <div className="flex-1 space-y-3 bg-secondary/30 rounded-lg p-4 overflow-y-auto mb-4">
+                  <div className="flex-1 min-h-0 space-y-3 bg-secondary/30 rounded-lg p-4 overflow-y-auto mb-4">
                     {messages.length > 0 ? (
                       messages.map((msg) => (
                         <div
@@ -864,7 +850,7 @@ export default function LineIntegrationPage() {
                   </div>
 
                   {/* Message Input */}
-                  <div className="flex gap-2">
+                  <div className="flex gap-2 shrink-0">
                     <Input
                       placeholder={
                         selectedUser

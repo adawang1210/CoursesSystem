@@ -137,16 +137,36 @@ async def line_webhook(
         print(f"📥 收到 LINE 事件，共 {len(events)} 筆")  # 🔥 探照燈 1
         
         for event in events:
-            print(f"🔍 正在處理事件類型: {type(event)}")  # 🔥 探照燈 2
-            
-            if isinstance(event, MessageEvent):
-                if isinstance(event.message, TextMessageContent):
-                    print(f"💬 進入文字處理邏輯，內容: {event.message.text}")  # 🔥 探照燈 3
-                    await line_service.handle_text_message(event)
-            elif isinstance(event, PostbackEvent):
-                await line_service.handle_postback(event)
-            elif isinstance(event, FollowEvent):
-                await line_service.handle_follow(event)
+            # =========== 🔥 新增：使用 try-except 包覆單一事件處理，攔截業務錯誤 ===========
+            try:
+                print(f"🔍 正在處理事件類型: {type(event)}") 
+                
+                if isinstance(event, MessageEvent):
+                    if isinstance(event.message, TextMessageContent):
+                        print(f"💬 進入文字處理邏輯，內容: {event.message.text}")
+                        await line_service.handle_text_message(event)
+                elif isinstance(event, PostbackEvent):
+                    await line_service.handle_postback(event)
+                elif isinstance(event, FollowEvent):
+                    await line_service.handle_follow(event)
+                    
+            except ValueError as ve:
+                # 攔截到 ValueError (例如：作答次數超過上限)，直接回覆給學生
+                print(f"⚠️ 業務邏輯拒絕: {str(ve)}")
+                if hasattr(event, "reply_token"):
+                    async with AsyncApiClient(configuration) as api_client:
+                        line_bot_api = AsyncMessagingApi(api_client)
+                        await line_bot_api.reply_message(
+                            ReplyMessageRequest(
+                                reply_token=event.reply_token,
+                                messages=[TextMessage(text=f"⚠️ {str(ve)}")]
+                            )
+                        )
+            except Exception as inner_e:
+                print(f"❌ 處理單一事件時發生未預期錯誤: {str(inner_e)}")
+                import traceback
+                traceback.print_exc()
+            # =========================================================================
                 
     except InvalidSignatureError:
         raise HTTPException(status_code=400, detail="無效的簽章")
