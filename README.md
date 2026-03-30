@@ -154,6 +154,11 @@ MONGODB_DB_NAME=courses_system
 # Line Bot 配置
 LINE_CHANNEL_SECRET=your-line-channel-secret
 LINE_CHANNEL_ACCESS_TOKEN=your-line-channel-access-token
+
+# AI 配置
+AI_API_KEY=your-ai-api-key
+AI_MODEL=your-ai-model
+
 ```
 
 **生成隨機密碼：**
