@@ -1,16 +1,17 @@
 FROM node:20-slim
 
-ENV NODE_ENV=production
-
 WORKDIR /app
 
-# 複製 package 檔案並安裝依賴
+# 複製 package 檔案並安裝所有依賴（含 devDependencies，build 需要）
 COPY package.json package-lock.json ./
 RUN npm install --legacy-peer-deps
 
 # 複製其餘原始碼並建置
 COPY . .
 RUN npm run build
+
+# 建置完成後設定 production 環境
+ENV NODE_ENV=production
 
 EXPOSE 3000
 
