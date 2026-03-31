@@ -2,6 +2,10 @@ FROM node:20-slim
 
 WORKDIR /app
 
+# 接收 build-time 環境變數
+ARG NEXT_PUBLIC_API_URL
+ENV NEXT_PUBLIC_API_URL=$NEXT_PUBLIC_API_URL
+
 # 複製 package 檔案並安裝所有依賴（含 devDependencies，build 需要）
 COPY package.json package-lock.json ./
 RUN npm install --legacy-peer-deps
@@ -10,7 +14,6 @@ RUN npm install --legacy-peer-deps
 COPY . .
 RUN npm run build
 
-# 建置完成後設定 production 環境
 ENV NODE_ENV=production
 
 EXPOSE 3000
