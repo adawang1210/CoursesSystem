@@ -2,9 +2,8 @@ FROM node:20-slim
 
 WORKDIR /app
 
-# 接收 build-time 環境變數
-ARG NEXT_PUBLIC_API_URL
-ENV NEXT_PUBLIC_API_URL=$NEXT_PUBLIC_API_URL
+# 設定後端 API URL（Railway 部署用）
+ENV NEXT_PUBLIC_API_URL=https://coursessystem-production.up.railway.app
 
 # 複製 package 檔案並安裝所有依賴（含 devDependencies，build 需要）
 COPY package.json package-lock.json ./
