@@ -1,0 +1,27 @@
+# ============================================================
+# Railway 部署配置
+# ============================================================
+# 本專案包含兩個服務，需在 Railway Dashboard 中分別建立：
+#
+# 1. courses-api (後端)
+#    - Source: 專案根目錄
+#    - Dockerfile Path: ./Dockerfile
+#    - Port: 8000
+#
+# 2. courses-frontend (前端)
+#    - Source: frontend/
+#    - Dockerfile Path: ./frontend/Dockerfile.frontend
+#    - Port: 3000
+#
+# 此檔案為後端服務的預設配置。
+# ============================================================
+
+[build]
+builder = "DOCKERFILE"
+dockerfilePath = "Dockerfile"
+
+[deploy]
+healthcheckPath = "/health"
+healthcheckTimeout = 300
+restartPolicyType = "ON_FAILURE"
+restartPolicyMaxRetries = 10

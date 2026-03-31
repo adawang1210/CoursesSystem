@@ -18,6 +18,9 @@ bcrypt==4.1.1
 # Line Bot SDK
 line-bot-sdk==3.6.0
 
+# Google Gemini AI
+google-genai>=1.0.0
+
 # Utilities
 python-dotenv==1.0.0
 httpx==0.25.2
@@ -33,4 +36,3 @@ openpyxl==3.1.2
 # Testing (optional)
 pytest==7.4.3
 pytest-asyncio==0.21.1
-

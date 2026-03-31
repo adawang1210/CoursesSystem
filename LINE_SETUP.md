@@ -24,14 +24,14 @@
 ./start_frontend.sh
 
 # 終端機 3 - 啟動 ngrok
-./start_ngrok.sh
+./ngrok.sh start
 # 或背景執行：ngrok http 8000 > ngrok.log 2>&1 &
 ```
 
 ### 步驟 2：取得 Webhook URL
 
 ```bash
-./get_ngrok_url.sh
+./ngrok.sh url
 ```
 
 複製輸出的 HTTPS URL，例如：
@@ -50,7 +50,7 @@ https://4727829a31c7.ngrok-free.app/line/webhook
 
 ### 步驟 4：測試
 
-透過 LINE 向您的 Bot 發送訊息，Bot 應該會回覆。
+透過 LINE 向您的 Bot 發送訊息，例如：「綁定 [課程ID] [學號]」來綁定課程，之後直接輸入文字即可作答。
 
 ---
 
@@ -86,7 +86,7 @@ brew install ngrok
 **選項 A：前台運行（推薦用於測試）**
 
 ```bash
-./start_ngrok.sh
+./ngrok.sh start
 ```
 
 **選項 B：背景運行**
@@ -98,7 +98,7 @@ ngrok http 8000 > ngrok.log 2>&1 &
 ### 獲取 HTTPS URL
 
 ```bash
-./get_ngrok_url.sh
+./ngrok.sh url
 ```
 
 或手動獲取：
@@ -134,7 +134,7 @@ tail -f ngrok.log
 
 - ngrok 免費版每次重啟都會生成新的 URL
 - 如果重啟了 ngrok，需要：
-  1. 執行 `./get_ngrok_url.sh` 獲取新 URL
+  1. 執行 `./ngrok.sh url` 獲取新 URL
   2. 更新 LINE Developers Console 中的 Webhook URL
 
 **固定 URL（付費功能）**
@@ -160,7 +160,7 @@ ngrok http 8000 --domain=your-fixed-domain.ngrok-free.app
 
 ### 2. 設定環境變數
 
-在專案根目錄的 `.env` 檔案中設定：
+在 `backend/.env` 檔案中設定：
 
 ```env
 # LINE Bot 配置
@@ -280,7 +280,7 @@ python view_db.py
 pkill -f ngrok
 
 # 重新啟動
-./start_ngrok.sh
+./ngrok.sh start
 ```
 
 ### 問題 2：無法獲取 ngrok URL
@@ -294,7 +294,7 @@ pkill -f ngrok
 lsof -i:4040
 
 # 如果沒有運行，啟動它
-./start_ngrok.sh
+./ngrok.sh start
 ```
 
 ### 問題 3：LINE Webhook 驗證失敗
@@ -313,7 +313,7 @@ lsof -i:4040
 curl http://localhost:8000/health
 
 # 2. 確認 ngrok 正在運行並獲取 URL
-./get_ngrok_url.sh
+./ngrok.sh url
 
 # 3. 測試 Webhook 端點
 curl https://your-ngrok-url.ngrok-free.app/line/webhook-url
@@ -358,7 +358,7 @@ python -c "from app.config import settings; print(f'Secret: {bool(settings.LINE_
    # 輸入 1 確認刪除
    ```
 
-2. **透過 LINE 發送測試訊息**
+2. **透過 LINE 發送測試訊息**（例如：`綁定 [課程ID] [學號]`）
 
 3. **刷新瀏覽器頁面**（Cmd+R 或 F5）
 

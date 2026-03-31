@@ -26,6 +26,7 @@ dist/
 # Env / Secrets
 .env
 .env.*
+!backend/.env.example
 frontend/.env
 backend/.env
 

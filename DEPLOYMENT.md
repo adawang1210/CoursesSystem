@@ -4,10 +4,110 @@
 
 ## 目錄
 
-1. [開發環境設定](#開發環境設定)
-2. [生產環境部署](#生產環境部署)
-3. [MongoDB 設定](#mongodb-設定)
-4. [疑難排解](#疑難排解)
+1. [Railway 部署（推薦）](#railway-部署推薦給學生)
+2. [開發環境設定](#開發環境設定)
+3. [VPS 部署（進階 / 大學伺服器）](#vps-部署進階--大學伺服器)
+4. [GitHub Actions CI/CD](#github-actions-cicd)
+5. [MongoDB 設定](#mongodb-設定)
+6. [疑難排解](#疑難排解)
+
+---
+
+## Railway 部署（推薦給學生）
+
+[Railway](https://railway.com/) 是最簡單的部署方式，無需管理伺服器，適合學生專案與小型課堂使用。
+
+### 預估費用
+
+Railway Hobby 方案每月 $5 美元，包含 $5 的免費用量額度。對於輕量課堂使用（一門課、30 位學生、每週幾次 Q&A），通常可控制在 $0–5/月：
+
+| 項目 | 預估用量 | 費用 |
+|------|---------|------|
+| 後端 (courses-api) | ~100 小時/月 | ~$1–2 |
+| 前端 (courses-frontend) | ~100 小時/月 | ~$1–2 |
+| MongoDB Atlas (M0 Free) | 512 MB | 免費 |
+| **合計** | | **~$0–5/月** |
+
+> 如果不使用時將服務暫停（Sleep），費用可以更低。
+
+### 步驟 1：建立 Railway 專案
+
+1. 前往 [Railway](https://railway.com/) 並使用 GitHub 帳號登入
+2. 點擊 **New Project** → **Deploy from GitHub repo**
+3. 選擇此 repository
+
+### 步驟 2：建立後端服務 (courses-api)
+
+1. 在專案中點擊 **New Service** → **GitHub Repo**
+2. 選擇此 repo
+3. 在 Service Settings 中設定：
+   - **Root Directory**: `/`（預設）
+   - **Builder**: Dockerfile
+   - **Dockerfile Path**: `Dockerfile`
+4. Railway 會自動建置並部署
+
+### 步驟 3：建立前端服務 (courses-frontend)
+
+1. 再次點擊 **New Service** → **GitHub Repo**
+2. 選擇同一個 repo
+3. 在 Service Settings 中設定：
+   - **Root Directory**: `frontend`
+   - **Builder**: Dockerfile
+   - **Dockerfile Path**: `Dockerfile.frontend`
+4. 在前端服務的 Variables 中新增：
+   - `NEXT_PUBLIC_API_URL` = 後端服務的 Railway URL（例如 `https://courses-api-production.up.railway.app`）
+
+### 步驟 4：設定 MongoDB
+
+推薦使用 [MongoDB Atlas](https://www.mongodb.com/atlas) 免費方案（M0 Shared Cluster）：
+
+1. 在 MongoDB Atlas 建立免費叢集
+2. 建立資料庫使用者
+3. 在 Network Access 中允許 `0.0.0.0/0`（或 Railway 的 IP）
+4. 取得連線字串，格式如：`mongodb+srv://user:pass@cluster.mongodb.net/courses_system`
+
+### 步驟 5：設定環境變數
+
+在後端服務的 **Variables** 頁面中設定以下變數：
+
+```env
+MONGODB_URI=mongodb+srv://user:pass@cluster.mongodb.net/courses_system
+MONGODB_DB_NAME=courses_system
+JWT_SECRET_KEY=<隨機生成的 32+ 字元字串>
+PSEUDONYM_SALT=<隨機生成的 32+ 字元字串>
+LINE_CHANNEL_SECRET=<你的 LINE Channel Secret>
+LINE_CHANNEL_ACCESS_TOKEN=<你的 LINE Access Token>
+GEMINI_API_KEY=<你的 Gemini API Key>
+GEMINI_MODEL=gemini-1.5-flash
+API_HOST=0.0.0.0
+API_PORT=8000
+CORS_ORIGINS=https://<your-frontend>.up.railway.app
+```
+
+生成隨機密鑰：
+```bash
+python3 -c "import secrets; print(secrets.token_hex(32))"
+```
+
+### 步驟 6：設定 LINE Webhook
+
+1. 前往 [LINE Developers Console](https://developers.line.biz/)
+2. 在 Messaging API → Webhook settings 中設定 URL：
+   ```
+   https://<your-backend>.up.railway.app/line/webhook
+   ```
+3. 啟用 **Use webhook** 並點擊 **Verify**
+
+### 步驟 7：設定 CORS
+
+將後端的 `CORS_ORIGINS` 環境變數設為前端服務的 Railway URL：
+```
+CORS_ORIGINS=https://<your-frontend>.up.railway.app
+```
+
+### 自動部署
+
+連結 GitHub repo 後，每次 push 到 `main` 分支，Railway 會自動重新建置並部署兩個服務。
 
 ---
 
@@ -26,7 +126,7 @@
 
 ---
 
-## 生產環境部署
+## VPS 部署（進階 / 大學伺服器）
 
 ### 1. 環境變數設定
 
@@ -54,9 +154,9 @@ CORS_ORIGINS=https://yourdomain.com
 LINE_CHANNEL_SECRET=your-production-line-channel-secret
 LINE_CHANNEL_ACCESS_TOKEN=your-production-line-access-token
 
-# AI 服務配置
-AI_SERVICE_URL=http://ai-service:8001
-AI_SERVICE_API_KEY=your-ai-service-api-key
+# AI 服務配置（Google Gemini）
+GEMINI_API_KEY=your-gemini-api-key
+GEMINI_MODEL=gemini-1.5-flash
 ```
 
 **生成隨機密碼：**
@@ -191,7 +291,7 @@ sudo systemctl reload nginx
 
 ```bash
 cd frontend
-npm install
+npm install --legacy-peer-deps
 npm run build
 ```
 
@@ -260,6 +360,54 @@ sudo apt install certbot python3-certbot-nginx
 sudo certbot --nginx -d yourdomain.com -d api.yourdomain.com
 
 # Certbot 會自動配置 Nginx 並設定自動更新
+```
+
+---
+
+## GitHub Actions CI/CD
+
+本專案包含兩個 GitHub Actions workflow：
+
+### CI（`.github/workflows/ci.yml`）
+
+每次 push 或 PR 到 `main` 分支時自動執行：
+- 後端：安裝 Python 套件、啟動 MongoDB 服務、執行 pytest、驗證後端可正常啟動
+- 前端：安裝 Node.js 套件（`--legacy-peer-deps`）、lint、production build
+
+### Deploy（`.github/workflows/deploy.yml`）
+
+push 到 `main` 且 CI 通過後自動部署：
+- SSH 連線至生產伺服器
+- 拉取最新程式碼
+- 更新後端套件並重啟服務
+- 重新建置前端並重啟服務
+
+### 必要的 GitHub Secrets
+
+在 GitHub repo 的 Settings → Secrets and variables → Actions 中設定：
+
+| Secret 名稱 | 說明 | 範例 |
+|-------------|------|------|
+| `DEPLOY_HOST` | 生產伺服器 IP 或 domain | `api.yourdomain.com` |
+| `DEPLOY_USER` | SSH 登入使用者 | `deploy` |
+| `DEPLOY_SSH_KEY` | SSH 私鑰（完整內容） | `-----BEGIN OPENSSH PRIVATE KEY-----...` |
+| `DEPLOY_PORT` | SSH port（選填，預設 22） | `22` |
+| `DEPLOY_PATH` | 專案在伺服器上的路徑（選填） | `/var/www/courses-system` |
+| `BACKEND_ENV` | 完整的 `backend/.env` 內容 | 見下方範例 |
+
+`BACKEND_ENV` 範例值（整段貼入 Secret）：
+```
+MONGODB_URI=mongodb://user:pass@localhost:27017
+MONGODB_DB_NAME=courses_system
+JWT_SECRET_KEY=your-production-jwt-secret
+PSEUDONYM_SALT=your-production-salt
+LINE_CHANNEL_SECRET=your-line-secret
+LINE_CHANNEL_ACCESS_TOKEN=your-line-token
+GEMINI_API_KEY=your-gemini-key
+GEMINI_MODEL=gemini-1.5-flash
+API_HOST=0.0.0.0
+API_PORT=8000
+CORS_ORIGINS=https://yourdomain.com
 ```
 
 ---

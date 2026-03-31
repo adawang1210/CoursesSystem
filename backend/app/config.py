@@ -30,12 +30,9 @@ class Settings(BaseSettings):
     API_PORT: int = 8000
     CORS_ORIGINS: str = "http://localhost:3000,http://localhost:5173"
     
-    # AI/NLP 服務配置
-    AI_BASE_URL: str = "https://api.openai.com/v1" 
-    AI_API_KEY: str = ""
-    AI_MODEL: str = "gpt-4o-mini"
-    # AI_SERVICE_URL: str = "http://localhost:8001"
-    # AI_SERVICE_API_KEY: str = ""
+    # Google Gemini AI 服務配置
+    GEMINI_API_KEY: str = ""
+    GEMINI_MODEL: str = "gemini-1.5-flash"
     
     class Config:
         env_file = ".env"
@@ -49,4 +46,3 @@ class Settings(BaseSettings):
 
 # 全域配置實例
 settings = Settings()
-

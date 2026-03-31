@@ -1,0 +1,88 @@
+name: Deploy
+
+on:
+  push:
+    branches: [main]
+
+# Only run after CI passes
+concurrency:
+  group: deploy-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  ci:
+    uses: ./.github/workflows/ci.yml
+
+  # ==========================================================
+  # Railway 部署 (推薦)
+  # ==========================================================
+  # Railway 透過 GitHub 整合自動部署，不需要額外的 CI/CD 步驟。
+  # 設定方式：
+  #   1. 在 Railway Dashboard 建立專案
+  #   2. 連結此 GitHub repo
+  #   3. 建立 courses-api 服務 → 指向根目錄 Dockerfile
+  #   4. 建立 courses-frontend 服務 → 指向 frontend/Dockerfile.frontend
+  #   5. 每次 push 到 main 分支，Railway 會自動觸發部署
+  #
+  # 如果使用 Railway，下方的 VPS deploy job 可以停用或移除。
+  # ==========================================================
+
+  # ==========================================================
+  # VPS 部署 (進階 / 大學伺服器)
+  # ==========================================================
+  deploy-vps:
+    name: Deploy to VPS (SSH)
+    needs: ci
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
+
+    steps:
+      - name: Deploy via SSH
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.DEPLOY_HOST }}
+          username: ${{ secrets.DEPLOY_USER }}
+          key: ${{ secrets.DEPLOY_SSH_KEY }}
+          port: ${{ secrets.DEPLOY_PORT || 22 }}
+          script: |
+            set -e
+
+            # Navigate to project directory
+            cd ${{ secrets.DEPLOY_PATH || '/var/www/courses-system' }}
+
+            # Pull latest code
+            git pull origin main
+
+            # --- Backend ---
+            echo "=== Updating backend ==="
+            cd backend
+
+            # Activate venv and install deps
+            source venv/bin/activate
+            pip install -r requirements.txt -q
+
+            # Write environment variables from GitHub Secret
+            echo '${{ secrets.BACKEND_ENV }}' > .env
+
+            deactivate
+            cd ..
+
+            # Restart backend service
+            sudo systemctl restart courses-api
+            echo "Backend restarted"
+
+            # --- Frontend ---
+            echo "=== Rebuilding frontend ==="
+            cd frontend
+            npm install --legacy-peer-deps --silent
+            npm run build
+
+            # Restart frontend (PM2 or systemd)
+            if command -v pm2 &> /dev/null; then
+              pm2 restart courses-frontend || pm2 start npm --name "courses-frontend" -- start
+            else
+              sudo systemctl restart courses-frontend 2>/dev/null || true
+            fi
+            echo "Frontend restarted"
+
+            echo "=== Deploy complete ==="

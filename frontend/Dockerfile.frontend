@@ -1,0 +1,17 @@
+FROM node:20-slim
+
+ENV NODE_ENV=production
+
+WORKDIR /app
+
+# 複製 package 檔案並安裝依賴
+COPY package.json package-lock.json ./
+RUN npm install --legacy-peer-deps
+
+# 複製其餘原始碼並建置
+COPY . .
+RUN npm run build
+
+EXPOSE 3000
+
+CMD ["npm", "start"]
