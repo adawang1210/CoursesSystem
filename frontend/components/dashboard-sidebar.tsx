@@ -26,16 +26,16 @@ const sidebarItems = [
     href: "/dashboard/courses",
   },
   {
-    id: "clustering",
-    label: "AI 聚類",
-    icon: Network,
-    href: "/dashboard/clustering",
-  },
-  { 
     id: "qa", 
     label: "Q&A 管理", 
     icon: MessageSquare, 
     href: "/dashboard/qa" 
+  },
+  {
+    id: "clustering",
+    label: "AI 聚類",
+    icon: Network,
+    href: "/dashboard/clustering",
   },
   {
     id: "announcements",

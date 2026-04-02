@@ -639,7 +639,7 @@ export default function LineIntegrationPage() {
       <Card
         className={`mb-8 ${
           bot.isConnected
-            ? "border-green-500/30 bg-green-50/50"
+            ? "border-green-500/30 bg-green-50/50 dark:bg-green-950/20"
             : "border-destructive/30 bg-destructive/5"
         }`}
       >

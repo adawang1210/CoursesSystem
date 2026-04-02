@@ -35,7 +35,7 @@ export default function DashboardLayout({
     <div className="min-h-screen bg-background">
       <DashboardHeader user={user} onLogout={handleLogout} />
 
-      <div className="flex">
+      <div className="flex min-h-[calc(100vh-57px)]">
         <DashboardSidebar />
 
         <main className="flex-1">{children}</main>
