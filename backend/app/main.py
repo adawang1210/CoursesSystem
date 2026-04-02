@@ -69,7 +69,8 @@ async def health_check():
     """健康檢查"""
     return {
         "status": "healthy",
-        "database": "connected" if db.db is not None else "disconnected"
+        "database": "connected" if db.db is not None else "disconnected",
+        "ai_model": settings.GEMINI_MODEL
     }
 
 

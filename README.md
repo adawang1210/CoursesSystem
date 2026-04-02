@@ -269,7 +269,7 @@ LINE_CHANNEL_ACCESS_TOKEN=<你的 Channel Access Token>
 # ===== AI 服務 =====
 # 從 Google AI Studio 取得 API Key: https://aistudio.google.com/apikey
 GEMINI_API_KEY=<你的 Gemini API Key>
-GEMINI_MODEL=gemini-1.5-flash
+GEMINI_MODEL=gemini-2.0-flash
 
 # ===== API 伺服器 =====
 API_HOST=0.0.0.0
@@ -385,7 +385,7 @@ Railway 是最簡單的雲端部署方式，適合學生與小型課堂使用。
    | `LINE_CHANNEL_SECRET` | LINE Bot Channel Secret | 選填 |
    | `LINE_CHANNEL_ACCESS_TOKEN` | LINE Bot Access Token | 選填 |
    | `GEMINI_API_KEY` | Google Gemini API Key | 選填 |
-   | `GEMINI_MODEL` | Gemini 模型名稱，預設 `gemini-1.5-flash` | 選填 |
+   | `GEMINI_MODEL` | Gemini 模型名稱，預設 `gemini-2.0-flash` | 選填 |
    | `API_HOST` | `0.0.0.0` | 選填 |
    | `API_PORT` | `8000` | 選填 |
    | `CORS_ORIGINS` | 前端服務的 Railway URL | ✅ |

@@ -32,7 +32,7 @@ class Settings(BaseSettings):
     
     # Google Gemini AI 服務配置
     GEMINI_API_KEY: str = ""
-    GEMINI_MODEL: str = "gemini-1.5-flash"
+    GEMINI_MODEL: str = "gemini-2.0-flash"
     
     class Config:
         env_file = ".env"

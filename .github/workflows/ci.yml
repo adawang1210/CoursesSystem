@@ -41,7 +41,7 @@ jobs:
           JWT_SECRET_KEY=ci-test-secret-key-at-least-32-characters-long
           PSEUDONYM_SALT=ci-test-salt-value-at-least-32-characters-long
           GEMINI_API_KEY=
-          GEMINI_MODEL=gemini-1.5-flash
+          GEMINI_MODEL=gemini-2.0-flash
           EOF
 
       - name: Run pytest (if tests exist)

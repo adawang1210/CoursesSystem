@@ -9,7 +9,7 @@ import {
   Sparkles,
   ArrowRight
 } from "lucide-react";
-import { coursesApi, qasApi, type Course } from "@/lib/api";
+import { coursesApi, qasApi, type Course, API_URL } from "@/lib/api";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/contexts/auth-context";
 
@@ -18,6 +18,7 @@ export default function DashboardPage() {
   const { isAuthenticated, user } = useAuth();
   const [courses, setCourses] = useState<Course[]>([]);
   const [activeQAs, setActiveQAs] = useState<any[]>([]);
+  const [aiModel, setAiModel] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
 
   // 如果未登入則導向登入頁
@@ -52,6 +53,15 @@ export default function DashboardPage() {
         });
         
         setActiveQAs(active);
+
+        // 3. 取得 AI 模型名稱
+        try {
+          const res = await fetch(`${API_URL}/health`);
+          const health = await res.json();
+          if (health.ai_model) setAiModel(health.ai_model);
+        } catch {
+          // 靜默失敗，保持顯示「隨時待命」
+        }
       } catch (error) {
         console.error("載入儀表板資料失敗", error);
       } finally {
@@ -109,6 +119,9 @@ export default function DashboardPage() {
               <div>
                 <p className="text-sm font-medium text-muted-foreground mb-1">AI 批閱大腦</p>
                 <p className="text-lg font-bold text-foreground mt-2">隨時待命</p>
+                {aiModel && (
+                  <p className="text-xs text-muted-foreground mt-1">{aiModel}</p>
+                )}
               </div>
               <div className="p-3 bg-amber-100 dark:bg-amber-900/30 rounded-lg">
                 <Sparkles className="w-6 h-6 text-amber-600 dark:text-amber-500" />

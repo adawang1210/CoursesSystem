@@ -101,7 +101,7 @@ LINE_CHANNEL_ACCESS_TOKEN=
 # ===== Google Gemini AI（請替換為你的值） =====
 # 從 https://aistudio.google.com/apikey 取得
 GEMINI_API_KEY=
-GEMINI_MODEL=gemini-1.5-flash
+GEMINI_MODEL=gemini-2.0-flash
 
 # ===== API 伺服器 =====
 API_HOST=0.0.0.0

@@ -78,7 +78,7 @@ PSEUDONYM_SALT=<隨機生成的 32+ 字元字串>
 LINE_CHANNEL_SECRET=<你的 LINE Channel Secret>
 LINE_CHANNEL_ACCESS_TOKEN=<你的 LINE Access Token>
 GEMINI_API_KEY=<你的 Gemini API Key>
-GEMINI_MODEL=gemini-1.5-flash
+GEMINI_MODEL=gemini-2.0-flash
 API_HOST=0.0.0.0
 API_PORT=8000
 CORS_ORIGINS=https://<your-frontend>.up.railway.app
@@ -156,7 +156,7 @@ LINE_CHANNEL_ACCESS_TOKEN=your-production-line-access-token
 
 # AI 服務配置（Google Gemini）
 GEMINI_API_KEY=your-gemini-api-key
-GEMINI_MODEL=gemini-1.5-flash
+GEMINI_MODEL=gemini-2.0-flash
 ```
 
 **生成隨機密碼：**
@@ -404,7 +404,7 @@ PSEUDONYM_SALT=your-production-salt
 LINE_CHANNEL_SECRET=your-line-secret
 LINE_CHANNEL_ACCESS_TOKEN=your-line-token
 GEMINI_API_KEY=your-gemini-key
-GEMINI_MODEL=gemini-1.5-flash
+GEMINI_MODEL=gemini-2.0-flash
 API_HOST=0.0.0.0
 API_PORT=8000
 CORS_ORIGINS=https://yourdomain.com
