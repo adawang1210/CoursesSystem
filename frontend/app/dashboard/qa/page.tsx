@@ -254,6 +254,23 @@ export default function QAPage() {
   };
 
   const handleRunAIClustering = async (qaId: string, courseId: string) => {
+    if (unclusteredApprovedCount === 0) {
+      const approvedCount = qaReplies.filter(r => r.review_status === 'approved').length;
+      if (approvedCount === 0) {
+        toast({
+          title: "尚無可分析的作答",
+          description: "請先將至少一筆學生作答批閱為「通過」，AI 才能進行診斷分析。",
+          variant: "destructive",
+        });
+      } else {
+        toast({
+          title: "所有作答皆已診斷",
+          description: "目前沒有新的未診斷作答，可前往「AI 聚類」頁面查看現有結果。",
+        });
+      }
+      return;
+    }
+
     setIsClustering(true);
     try {
       const success = await aiApi.runClustering(courseId, 5, qaId);
@@ -262,7 +279,6 @@ export default function QAPage() {
           title: "AI 批閱完成 ⚡",
           description: "診斷結果已更新，可前往「AI 聚類」頁面查看詳細分群。",
         });
-        // 重新載入回覆以顯示更新後的 cluster 標記
         loadReplies(qaId);
       } else {
         toast({ title: "啟動失敗", description: "無法啟動 AI 批閱任務", variant: "destructive" });
@@ -647,8 +663,7 @@ export default function QAPage() {
                                 size="sm"
                                 className="h-7 text-xs bg-indigo-50 text-indigo-700 hover:bg-indigo-100 border-indigo-200 dark:bg-indigo-900/30 dark:text-indigo-400 dark:border-indigo-800"
                                 onClick={() => handleRunAIClustering(selectedQA.id, selectedQA.courseId)}
-                                disabled={isClustering || unclusteredApprovedCount === 0}
-                                title={unclusteredApprovedCount === 0 ? "沒有尚未診斷的新作答" : ""}
+                                disabled={isClustering}
                               >
                                 {isClustering ? <Loader2 className="w-3 h-3 mr-1 animate-spin" /> : <Zap className="w-3 h-3 mr-1" />}
                                 AI 診斷 ({unclusteredApprovedCount})
@@ -671,11 +686,10 @@ export default function QAPage() {
                               size="sm"
                               className="h-7 text-xs bg-indigo-50 text-indigo-700 hover:bg-indigo-100 border-indigo-200 dark:bg-indigo-900/30 dark:text-indigo-400 dark:border-indigo-800"
                               onClick={() => handleRunAIClustering(selectedQA.id, selectedQA.courseId)}
-                              disabled={isClustering || unclusteredApprovedCount === 0}
-                              title={unclusteredApprovedCount === 0 ? "請先將至少一筆作答設為「通過」才能進行 AI 診斷" : ""}
+                              disabled={isClustering}
                             >
                               {isClustering ? <Loader2 className="w-3 h-3 mr-1 animate-spin" /> : <Zap className="w-3 h-3 mr-1" />}
-                              AI 診斷分析 ({unclusteredApprovedCount})
+                              AI 診斷分析
                             </Button>
                           )}
                           
