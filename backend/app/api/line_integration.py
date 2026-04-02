@@ -253,6 +253,40 @@ async def get_line_users():
     return {"success": True, "data": {"users": users, "total": len(users)}}
 
 
+@router.get("/messages/search", summary="搜尋 LINE 訊息")
+async def search_line_messages(
+    keyword: str,
+    user_id: Optional[str] = None,
+    limit: int = 200
+):
+    database = db.get_db()
+    messages_collection = database["line_messages"]
+    
+    query = {"content": {"$regex": keyword, "$options": "i"}}
+    if user_id:
+        query["user_id"] = user_id
+    
+    cursor = messages_collection.find(query).sort("created_at", 1).limit(limit)
+    messages = await cursor.to_list(length=limit)
+    
+    for msg in messages:
+        msg["_id"] = str(msg["_id"])
+        if "created_at" in msg:
+            msg["created_at"] = msg["created_at"].isoformat()
+    
+    total = await messages_collection.count_documents(query)
+    
+    return {
+        "success": True,
+        "data": {
+            "messages": messages,
+            "total": total,
+            "limit": limit,
+            "offset": 0
+        }
+    }
+
+
 @router.get("/messages", summary="取得 LINE 訊息歷史")
 async def get_line_messages(
     limit: int = 50,

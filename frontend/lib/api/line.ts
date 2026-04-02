@@ -176,6 +176,24 @@ export async function getMessageStats(
 }
 
 /**
+ * 搜尋 LINE 訊息
+ */
+export async function searchLineMessages(
+  keyword: string,
+  userId?: string,
+  limit: number = 200
+): Promise<LineMessagesResponse> {
+  const params: any = { keyword, limit };
+  if (userId) params.user_id = userId;
+
+  const response = await apiClient.get<{
+    success: boolean;
+    data: LineMessagesResponse;
+  }>("/line/messages/search", params);
+  return response.data;
+}
+
+/**
  * 發送訊息到 LINE
  */
 export async function sendLineMessage(

@@ -63,6 +63,7 @@ class CourseService:
         
         # 獲取提問數統計
         questions_collection = database["questions"]
+        line_users_collection = database["line_users"]
         
         for c in courses:
             course_id = str(c["_id"])
@@ -75,14 +76,11 @@ class CourseService:
             })
             c["question_count"] = question_count
             
-            # 計算此課程的學生數（去重的匿名ID，排除已刪除的提問）
-            pipeline = [
-                {"$match": {"course_id": course_id, "status": {"$ne": "DELETED"}}},
-                {"$group": {"_id": "$anonymous_id"}},
-                {"$count": "total"}
-            ]
-            student_stats = await questions_collection.aggregate(pipeline).to_list(length=1)
-            c["student_count"] = student_stats[0]["total"] if student_stats else 0
+            # 計算此課程已綁定的學生數（從 line_users 集合）
+            student_count = await line_users_collection.count_documents({
+                "current_course_id": course_id
+            })
+            c["student_count"] = student_count
         
         return courses
     

@@ -1,5 +1,5 @@
 "use client";
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -23,7 +23,8 @@ import {
   AlertCircle,
   Copy,
   CheckCircle2,
-  Link as LinkIcon, 
+  Link as LinkIcon,
+  Search,
 } from "lucide-react";
 import {
   getLineConfig,
@@ -34,6 +35,7 @@ import {
   getMessageStats,
   getLineUsers,
   sendLineMessage,
+  searchLineMessages,
   coursesApi, 
   type Course, 
   type LineMessage as ApiLineMessage,
@@ -107,7 +109,10 @@ export default function LineIntegrationPage() {
   const [messageStats, setMessageStats] = useState<DailyMessageStat[]>([]);
   const [dailyStats, setDailyStats] = useState<DailyActivityStat[]>([]);
   const [userLabels, setUserLabels] = useState<Record<string, string>>({});
+  const [searchKeyword, setSearchKeyword] = useState("");
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const messagesContainerRef = useRef<HTMLDivElement>(null);
+  const shouldScrollRef = useRef(true);
   const { toast } = useToast();
 
   useEffect(() => {
@@ -120,6 +125,8 @@ export default function LineIntegrationPage() {
   }, []);
 
   useEffect(() => {
+    shouldScrollRef.current = true;
+    setSearchKeyword("");
     if (selectedUser) {
       loadMessages(selectedUser.user_id);
     } else {
@@ -127,8 +134,35 @@ export default function LineIntegrationPage() {
     }
   }, [selectedUser]);
 
+  // Polling: refresh messages every 5 seconds
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    const interval = setInterval(() => {
+      if (!searchKeyword) {
+        if (selectedUser) {
+          loadMessages(selectedUser.user_id);
+        } else {
+          loadMessages();
+        }
+      }
+    }, 5000);
+    return () => clearInterval(interval);
+  }, [selectedUser, searchKeyword, userLabels]);
+
+  // Smart scroll: only auto-scroll when shouldScrollRef is true or user is at bottom
+  useEffect(() => {
+    const container = messagesContainerRef.current;
+    if (!container) return;
+    if (shouldScrollRef.current) {
+      messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+      shouldScrollRef.current = false;
+    } else {
+      // Auto-scroll only if user was already near the bottom
+      const { scrollTop, scrollHeight, clientHeight } = container;
+      const isNearBottom = scrollHeight - scrollTop - clientHeight < 80;
+      if (isNearBottom) {
+        messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+      }
+    }
   }, [messages]);
 
   const loadLineConfig = async () => {
@@ -361,6 +395,7 @@ export default function LineIntegrationPage() {
 
     const messageText = newMessage.trim();
     setNewMessage("");
+    shouldScrollRef.current = true;
 
     try {
       const result = await sendLineMessage(selectedUser.user_id, messageText);
@@ -381,6 +416,56 @@ export default function LineIntegrationPage() {
         variant: "destructive",
       });
     }
+  };
+
+  const handleSearch = useCallback(async (keyword: string) => {
+    setSearchKeyword(keyword);
+    if (!keyword.trim()) {
+      // Clear search — reload normal messages
+      if (selectedUser) {
+        loadMessages(selectedUser.user_id);
+      } else {
+        loadMessages();
+      }
+      return;
+    }
+    try {
+      const data = await searchLineMessages(keyword, selectedUser?.user_id);
+      const convertedMessages: LineMessage[] = data.messages.map((msg) => ({
+        id: msg._id,
+        sender:
+          msg.direction === "received"
+            ? getLabelForUser(msg.user_id, msg.pseudonym)
+            : "系統",
+        content: msg.content,
+        timestamp: new Date(ensureUTC(msg.created_at)!).toLocaleString("zh-TW", {
+          year: "numeric",
+          month: "2-digit",
+          day: "2-digit",
+          hour: "2-digit",
+          minute: "2-digit",
+        }),
+        status: msg.direction,
+      }));
+      setMessages(convertedMessages);
+    } catch (error) {
+      console.error("搜尋訊息失敗:", error);
+    }
+  }, [selectedUser, userLabels]);
+
+  const highlightText = (text: string, keyword: string) => {
+    if (!keyword.trim()) return text;
+    const regex = new RegExp(`(${keyword.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")})`, "gi");
+    const parts = text.split(regex);
+    return parts.map((part, i) =>
+      regex.test(part) ? (
+        <mark key={i} className="bg-yellow-300 dark:bg-yellow-600 text-foreground rounded-sm px-0.5">
+          {part}
+        </mark>
+      ) : (
+        part
+      )
+    );
   };
 
   if (loading) {
@@ -809,23 +894,36 @@ export default function LineIntegrationPage() {
                   
                   {/* Chat Header */}
                   <div className="mb-4 pb-3 border-b shrink-0">
-                    <h3 className="font-semibold">
-                      {selectedUser
-                        ? `與 ${getLabelForUser(
-                            selectedUser.user_id,
-                            selectedUser.pseudonym
-                          )} 的對話`
-                        : "所有訊息"}
-                    </h3>
-                    {selectedUser && (
-                      <p className="text-xs text-muted-foreground mt-1">
-                        共 {selectedUser.message_count} 則訊息
-                      </p>
-                    )}
+                    <div className="flex items-center justify-between mb-2">
+                      <div>
+                        <h3 className="font-semibold">
+                          {selectedUser
+                            ? `與 ${getLabelForUser(
+                                selectedUser.user_id,
+                                selectedUser.pseudonym
+                              )} 的對話`
+                            : "所有訊息"}
+                        </h3>
+                        {selectedUser && (
+                          <p className="text-xs text-muted-foreground mt-1">
+                            共 {selectedUser.message_count} 則訊息
+                          </p>
+                        )}
+                      </div>
+                    </div>
+                    <div className="relative">
+                      <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+                      <Input
+                        placeholder="搜尋對話內容..."
+                        value={searchKeyword}
+                        onChange={(e) => handleSearch(e.target.value)}
+                        className="pl-8 h-8 text-sm"
+                      />
+                    </div>
                   </div>
 
                   {/* Messages */}
-                  <div className="flex-1 min-h-0 space-y-3 bg-secondary/30 rounded-lg p-4 overflow-y-auto mb-4">
+                  <div ref={messagesContainerRef} className="flex-1 min-h-0 space-y-3 bg-secondary/30 rounded-lg p-4 overflow-y-auto mb-4">
                     {messages.length > 0 ? (
                       messages.map((msg) => (
                         <div
@@ -848,7 +946,7 @@ export default function LineIntegrationPage() {
                             <p className="text-xs font-medium mb-1">
                               {msg.sender}
                             </p>
-                            <p className="text-sm break-words">{msg.content}</p>
+                            <p className="text-sm break-words">{highlightText(msg.content, searchKeyword)}</p>
                             <p className="text-xs opacity-70 mt-1">
                               {msg.timestamp}
                             </p>
@@ -858,11 +956,17 @@ export default function LineIntegrationPage() {
                     ) : (
                       <div className="text-center py-12 text-muted-foreground">
                         <MessageCircle className="w-12 h-12 mx-auto mb-3 opacity-50" />
-                        <p>尚無訊息記錄</p>
-                        {!selectedUser && (
-                          <p className="text-sm mt-2">
-                            選擇使用者或開始透過 LINE Bot 與學生互動吧！
-                          </p>
+                        {searchKeyword ? (
+                          <p>找不到符合的訊息</p>
+                        ) : (
+                          <>
+                            <p>尚無訊息記錄</p>
+                            {!selectedUser && (
+                              <p className="text-sm mt-2">
+                                選擇使用者或開始透過 LINE Bot 與學生互動吧！
+                              </p>
+                            )}
+                          </>
                         )}
                       </div>
                     )}
