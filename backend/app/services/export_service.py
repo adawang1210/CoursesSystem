@@ -7,7 +7,7 @@ import io
 from typing import List, Dict, Any, Optional
 from datetime import datetime
 from ..database import db
-from ..utils.datetime_helper import format_datetime
+from ..utils.datetime_helper import format_datetime, build_date_range_query
 
 
 class ExportService:
@@ -37,14 +37,7 @@ class ExportService:
             query["cluster_id"] = cluster_id
         
         # 時間區間過濾
-        if start_date or end_date:
-            query["created_at"] = {}
-            if start_date:
-                query["created_at"]["$gte"] = start_date
-            if end_date:
-                # 將結束時間設定為當天的 23:59:59
-                adjusted_end = end_date.replace(hour=23, minute=59, second=59, microsecond=999999)
-                query["created_at"]["$lte"] = adjusted_end
+        query.update(build_date_range_query(start_date, end_date))
         
         # 取得資料
         cursor = collection.find(query).sort("created_at", -1)
@@ -143,17 +136,22 @@ class ExportService:
         if class_id:
             query["$or"] = [{"class_id": class_id}, {"class_id": None}]
 
-        if start_date or end_date:
-            query["created_at"] = {}
-            if start_date:
-                query["created_at"]["$gte"] = start_date
-            if end_date:
-                # 將結束時間設定為當天的 23:59:59
-                adjusted_end = end_date.replace(hour=23, minute=59, second=59, microsecond=999999)
-                query["created_at"]["$lte"] = adjusted_end
+        query.update(build_date_range_query(start_date, end_date))
         
         cursor = qa_collection.find(query).sort("created_at", -1)
         qas = await cursor.to_list(length=None)
+        
+        # Batch query all replies for all QAs
+        qa_ids = [str(qa["_id"]) for qa in qas]
+        all_replies_cursor = question_collection.find(
+            {"reply_to_qa_id": {"$in": qa_ids}}
+        ).sort("created_at", 1)
+        all_replies = await all_replies_cursor.to_list(length=None)
+        
+        replies_map = {}
+        for r in all_replies:
+            qa_id = r.get("reply_to_qa_id")
+            replies_map.setdefault(qa_id, []).append(r)
         
         output = io.StringIO()
         writer = csv.writer(output)
@@ -167,9 +165,8 @@ class ExportService:
             qa_id_str = str(qa["_id"])
             tags = qa.get("tags") or []
             
-            # 去 questions 集合中尋找針對此 Q&A 的學生回覆
-            replies_cursor = question_collection.find({"reply_to_qa_id": qa_id_str}).sort("created_at", 1)
-            replies = await replies_cursor.to_list(length=None)
+            # Use pre-fetched replies from map
+            replies = replies_map.get(qa_id_str, [])
             
             # 將學生的回覆組合成單一字串排版
             formatted_replies = []
@@ -221,14 +218,7 @@ class ExportService:
         if class_id:
             query["class_id"] = class_id
 
-        if start_date or end_date:
-            query["created_at"] = {}
-            if start_date:
-                query["created_at"]["$gte"] = start_date
-            if end_date:
-                # 將結束時間設定為當天的 23:59:59
-                adjusted_end = end_date.replace(hour=23, minute=59, second=59, microsecond=999999)
-                query["created_at"]["$lte"] = adjusted_end
+        query.update(build_date_range_query(start_date, end_date))
         
         # 1. 取得總作答數
         total_replies = await collection.count_documents(query)

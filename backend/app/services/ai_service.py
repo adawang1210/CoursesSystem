@@ -2,11 +2,15 @@
 AI 服務模組
 使用 Google Gemini API（google-genai SDK）提供 AI 聚類分析、回覆草稿生成等功能
 """
+import asyncio
 import json
+import logging
 from typing import List, Dict, Any, Optional
 from google import genai
 from google.genai import types
 from ..config import settings
+
+logger = logging.getLogger(__name__)
 
 
 class AIService:
@@ -23,14 +27,14 @@ class AIService:
             self._client = genai.Client(api_key=self.api_key)
         return self._client
 
-    def _call_gemini(
+    async def _call_gemini(
         self,
         prompt: str,
         json_mode: bool = False,
         temperature: float = 0.7
     ) -> Any:
         """
-        內部共用的 Gemini API 呼叫邏輯
+        非同步 Gemini API 呼叫，含重試與逾時機制
 
         Args:
             prompt: 完整的提示文字（含系統指令與使用者輸入）
@@ -42,42 +46,69 @@ class AIService:
         if not self.api_key:
             raise ValueError("系統設定錯誤：缺少 GEMINI_API_KEY")
 
-        try:
-            client = self._get_client()
+        client = self._get_client()
 
+        config = types.GenerateContentConfig(
+            temperature=temperature,
+            max_output_tokens=2048,
+        )
+        if json_mode:
             config = types.GenerateContentConfig(
                 temperature=temperature,
                 max_output_tokens=2048,
+                response_mime_type="application/json",
             )
-            if json_mode:
-                config = types.GenerateContentConfig(
-                    temperature=temperature,
-                    max_output_tokens=2048,
-                    response_mime_type="application/json",
+
+        max_attempts = settings.GEMINI_RETRY_MAX_ATTEMPTS
+        base_delay = settings.GEMINI_RETRY_BASE_DELAY
+        timeout = settings.GEMINI_TIMEOUT_SECONDS
+
+        for attempt in range(max_attempts):
+            try:
+                response = await asyncio.wait_for(
+                    asyncio.to_thread(
+                        client.models.generate_content,
+                        model=self.model_name,
+                        contents=prompt,
+                        config=config,
+                    ),
+                    timeout=timeout,
                 )
 
-            response = client.models.generate_content(
-                model=self.model_name,
-                contents=prompt,
-                config=config,
-            )
+                content = response.text.strip()
 
-            content = response.text.strip()
+                if json_mode:
+                    try:
+                        return json.loads(content)
+                    except json.JSONDecodeError:
+                        logger.error("JSON 解析失敗，原始內容: %s", content)
+                        return {}
 
-            if json_mode:
-                try:
-                    return json.loads(content)
-                except json.JSONDecodeError:
-                    print(f"❌ JSON 解析失敗，原始內容: {content}")
-                    return {}
+                return content
 
-            return content
+            except asyncio.TimeoutError:
+                logger.error("Gemini API 呼叫逾時 (超過 %s 秒)", timeout)
+                raise
 
-        except Exception as e:
-            print(f"❌ Gemini AI 呼叫失敗: {str(e)}")
-            return None
+            except Exception as e:
+                error_str = str(e)
+                is_retryable = "429" in error_str or "503" in error_str
+                if is_retryable and attempt < max_attempts - 1:
+                    delay = base_delay * (2 ** attempt)
+                    logger.warning(
+                        "Gemini API 重試 %d/%d，錯誤: %s，等待 %.1f 秒",
+                        attempt + 1, max_attempts, error_str, delay,
+                    )
+                    await asyncio.sleep(delay)
+                    continue
 
-    def get_reply(self, user_message: str, system_prompt: str = None) -> str:
+                logger.error("Gemini AI 呼叫失敗: %s", error_str)
+                return None
+
+        logger.error("Gemini API 所有 %d 次重試均失敗", max_attempts)
+        return None
+
+    async def get_reply(self, user_message: str, system_prompt: str = None) -> str:
         """
         一般對話回覆（給 LINE Bot 直接回話用）
         """
@@ -85,10 +116,10 @@ class AIService:
             system_prompt = "你是一個熱心的教學助理，請用繁體中文回答學生的問題。"
 
         prompt = f"{system_prompt}\n\n學生訊息：{user_message}"
-        result = self._call_gemini(prompt)
+        result = await self._call_gemini(prompt)
         return result if result else "系統忙碌中，請稍後再試。"
 
-    def analyze_question(self, question_text: str) -> Dict[str, Any]:
+    async def analyze_question(self, question_text: str) -> Dict[str, Any]:
         """
         深度分析提問，回傳結構化 JSON
         """
@@ -101,12 +132,12 @@ class AIService:
 
 學生提問：""" + question_text
 
-        result = self._call_gemini(prompt, json_mode=True, temperature=0.3)
+        result = await self._call_gemini(prompt, json_mode=True, temperature=0.3)
         if not result:
             return {"keywords": [], "difficulty_score": 0.0, "sentiment": "neutral", "summary": "分析失敗"}
         return result
 
-    def generate_response_draft(self, question_text: str) -> str:
+    async def generate_response_draft(self, question_text: str) -> str:
         """
         生成教學回覆草稿
         """
@@ -118,10 +149,10 @@ class AIService:
 
 學生問題：""" + question_text
 
-        result = self._call_gemini(prompt, temperature=0.7)
+        result = await self._call_gemini(prompt, temperature=0.7)
         return result if result else "無法生成草稿"
 
-    def perform_qa_answer_clustering(
+    async def perform_qa_answer_clustering(
         self,
         student_answers: List[str],
         teacher_question: str,
@@ -150,6 +181,11 @@ class AIService:
         prompt = f"""你是一位專業的「教育診斷分析師」。老師出了一道探究型的問答題，並提供了期望學生掌握的「核心觀念」。
 你的任務不是單純批改對錯，而是要「深度診斷」以下學生的作答，將具有「相似理解類型」、「相同認知盲點」或「相似迷思」的回答進行分群聚類。
 
+⚠️ 所有群組標籤與摘要必須使用繁體中文。
+
+【電子商務領域指引】
+本課程涉及電子商務主題，學生回答可能涉及台灣常見電商平台（蝦皮、momo、PChome、博客來等）及相關概念（B2C、C2C、跨境電商、物流金流、數位行銷等）。請在分群時考慮電商領域的專業知識脈絡。
+
 【教學與診斷資訊】
 - 老師的提問：{teacher_question}
 - 期望的核心觀念：{core_concept}
@@ -175,7 +211,7 @@ class AIService:
 請對以下學生的回答進行教育診斷與分群：
 {indexed_text}"""
 
-        result = self._call_gemini(prompt, json_mode=True, temperature=0.5)
+        result = await self._call_gemini(prompt, json_mode=True, temperature=0.5)
 
         if not result:
             return {"clusters": []}

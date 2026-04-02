@@ -61,26 +61,29 @@ class CourseService:
         cursor = collection.find(query).skip(skip).limit(limit)
         courses = await cursor.to_list(length=limit)
         
-        # 獲取提問數統計
+        course_ids = [str(c["_id"]) for c in courses]
+        
+        # Batch query question counts
         questions_collection = database["questions"]
+        q_pipeline = [
+            {"$match": {"course_id": {"$in": course_ids}, "status": {"$ne": "DELETED"}}},
+            {"$group": {"_id": "$course_id", "count": {"$sum": 1}}}
+        ]
+        q_stats = {s["_id"]: s["count"] for s in await questions_collection.aggregate(q_pipeline).to_list(None)}
+        
+        # Batch query student counts
         line_users_collection = database["line_users"]
+        s_pipeline = [
+            {"$match": {"current_course_id": {"$in": course_ids}}},
+            {"$group": {"_id": "$current_course_id", "count": {"$sum": 1}}}
+        ]
+        s_stats = {s["_id"]: s["count"] for s in await line_users_collection.aggregate(s_pipeline).to_list(None)}
         
         for c in courses:
-            course_id = str(c["_id"])
-            c["_id"] = course_id
-            
-            # 計算此課程的提問總數（排除已刪除的提問）
-            question_count = await questions_collection.count_documents({
-                "course_id": course_id,
-                "status": {"$ne": "DELETED"}
-            })
-            c["question_count"] = question_count
-            
-            # 計算此課程已綁定的學生數（從 line_users 集合）
-            student_count = await line_users_collection.count_documents({
-                "current_course_id": course_id
-            })
-            c["student_count"] = student_count
+            cid = str(c["_id"])
+            c["_id"] = cid
+            c["question_count"] = q_stats.get(cid, 0)
+            c["student_count"] = s_stats.get(cid, 0)
         
         return courses
     

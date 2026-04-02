@@ -2,7 +2,7 @@
 日期時間處理工具
 """
 from datetime import datetime, timezone
-from typing import Optional
+from typing import Any, Dict, Optional
 
 
 def utc_now() -> datetime:
@@ -30,3 +30,22 @@ def parse_datetime(date_str: str, format_str: str = "%Y-%m-%d %H:%M:%S") -> Opti
     except ValueError:
         return None
 
+
+
+def build_date_range_query(
+    start_date: Optional[datetime] = None,
+    end_date: Optional[datetime] = None,
+    field_name: str = "created_at"
+) -> Dict[str, Any]:
+    """建構 MongoDB 日期區間查詢條件"""
+    if not start_date and not end_date:
+        return {}
+    date_filter = {}
+    if start_date:
+        date_filter["$gte"] = start_date
+    if end_date:
+        adjusted_end = end_date.replace(hour=23, minute=59, second=59, microsecond=999999)
+        date_filter["$lte"] = adjusted_end
+    if date_filter:
+        return {field_name: date_filter}
+    return {}

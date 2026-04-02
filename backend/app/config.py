@@ -33,6 +33,9 @@ class Settings(BaseSettings):
     # Google Gemini AI 服務配置
     GEMINI_API_KEY: str = ""
     GEMINI_MODEL: str = "gemini-2.0-flash"
+    GEMINI_RETRY_MAX_ATTEMPTS: int = 3
+    GEMINI_RETRY_BASE_DELAY: float = 1.0
+    GEMINI_TIMEOUT_SECONDS: float = 30.0
     
     class Config:
         env_file = ".env"

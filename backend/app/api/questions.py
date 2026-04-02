@@ -7,6 +7,7 @@ from typing import List, Optional
 # 🔥 修改：引入 ReviewStatusBatchUpdate
 from ..models.schemas import QuestionCreate, ReviewStatusUpdate, ReviewStatusBatchUpdate
 from ..services.question_service import question_service
+from ..utils.validators import validate_object_id
 
 router = APIRouter(prefix="/questions", tags=["questions"])
 
@@ -33,6 +34,7 @@ async def create_question(question_data: QuestionCreate, background_tasks: Backg
 @router.get("/{question_id}", response_model=dict, summary="取得作答詳情")
 async def get_question(question_id: str):
     """取得單一作答的詳細資訊"""
+    validate_object_id(question_id, "作答紀錄ID")
     question = await question_service.get_question(question_id)
     if not question:
         raise HTTPException(status_code=404, detail="找不到此作答紀錄")
@@ -73,6 +75,7 @@ async def update_review_status(
     """
     更新學生的作答批閱狀態與評語 (教師/助教使用)
     """
+    validate_object_id(question_id, "作答紀錄ID")
     question = await question_service.update_review_status(
         question_id=question_id,
         review_status=review_data.review_status,
@@ -95,30 +98,30 @@ async def batch_update_review_status(batch_data: ReviewStatusBatchUpdate):
     """
     一次更新多個學生作答的批閱狀態 (教師/助教批量操作使用)
     """
-    success_count = 0
-    failed_count = 0
+    from bson import ObjectId
+    from datetime import datetime
+    from ..database import db
     
-    for q_id in batch_data.question_ids:
-        try:
-            # 沿用原本的單筆更新服務，跑迴圈處理
-            updated_question = await question_service.update_review_status(
-                question_id=q_id,
-                review_status=batch_data.review_status,
-                feedback=batch_data.feedback
-            )
-            if updated_question:
-                success_count += 1
-            else:
-                failed_count += 1
-        except Exception as e:
-            failed_count += 1
-            print(f"批量更新作答 {q_id} 失敗: {str(e)}")
-            
+    database = db.get_db()
+    collection = database["questions"]
+    
+    object_ids = [ObjectId(qid) for qid in batch_data.question_ids]
+    update_fields = {
+        "review_status": batch_data.review_status,
+        "updated_at": datetime.utcnow()
+    }
+    if batch_data.feedback is not None:
+        update_fields["feedback"] = batch_data.feedback
+    
+    result = await collection.update_many(
+        {"_id": {"$in": object_ids}},
+        {"$set": update_fields}
+    )
+    
     return {
         "success": True,
-        "message": f"批量批閱完成！成功: {success_count} 筆，失敗: {failed_count} 筆",
-        "success_count": success_count,
-        "failed_count": failed_count
+        "message": f"批量批閱完成！成功: {result.modified_count} 筆",
+        "modified_count": result.modified_count
     }
 # ========================================================
 
@@ -129,6 +132,7 @@ async def get_questions_by_cluster(
     course_id: str = Query(..., description="課程ID")
 ):
     """取得同一 AI 聚類的所有作答紀錄"""
+    validate_object_id(cluster_id, "聚類ID")
     questions = await question_service.get_questions_by_cluster(
         course_id, cluster_id
     )
@@ -143,6 +147,7 @@ async def get_questions_by_cluster(
 @router.delete("/{question_id}", response_model=dict, summary="刪除作答")
 async def delete_question(question_id: str):
     """刪除作答 (直接刪除)"""
+    validate_object_id(question_id, "作答紀錄ID")
     success = await question_service.delete_question(question_id)
     
     if not success:

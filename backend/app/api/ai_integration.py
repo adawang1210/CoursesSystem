@@ -15,6 +15,7 @@ from ..models.schemas import (
 from ..services.question_service import question_service
 from ..services.ai_service import ai_service
 from ..services.qa_service import qa_service  
+from ..utils.validators import validate_object_id
 
 router = APIRouter(prefix="/ai", tags=["ai-integration"])
 
@@ -68,8 +69,8 @@ async def generate_response_draft(question_id: str, background_tasks: Background
 
     async def _generate_and_save_draft(qid: str, text: str):
         try:
-            draft = ai_service.generate_response_draft(text)
-            analysis = ai_service.analyze_question(text)
+            draft = await ai_service.generate_response_draft(text)
+            analysis = await ai_service.analyze_question(text)
             summary = analysis.get("summary", "")
             new_difficulty = analysis.get("difficulty_score")
             if new_difficulty is None:
@@ -103,6 +104,10 @@ async def generate_course_clusters(request: ClusterGenerateRequest):
     from ..database import db
     from bson import ObjectId
     from datetime import datetime
+    
+    validate_object_id(course_id, "課程ID")
+    if qa_id:
+        validate_object_id(qa_id, "Q&A ID")
     
     try:
         database = db.get_db()
@@ -160,7 +165,7 @@ async def generate_course_clusters(request: ClusterGenerateRequest):
             q_texts = [r['answer_text'] for r in replies]
             
             # 3. 呼叫新的 AI 批閱大腦 (等待結果)
-            ai_result = ai_service.perform_qa_answer_clustering(
+            ai_result = await ai_service.perform_qa_answer_clustering(
                 student_answers=q_texts,
                 teacher_question=teacher_question,
                 core_concept=core_concept,                        # 🔥 傳遞核心觀念
@@ -239,6 +244,10 @@ async def get_clusters_summary(
     from ..database import db
     database = db.get_db()
 
+    validate_object_id(course_id, "課程ID")
+    if qa_id:
+        validate_object_id(qa_id, "Q&A ID")
+
     cluster_match = {"course_id": course_id}
     if qa_id:
         cluster_match["qa_id"] = qa_id
@@ -315,6 +324,7 @@ async def update_cluster(cluster_id: str, update_data: ClusterUpdate):
     from bson import ObjectId
     from datetime import datetime
     
+    validate_object_id(cluster_id, "聚類ID")
     database = db.get_db()
     update_fields = {"updated_at": datetime.utcnow()}
     
@@ -380,12 +390,10 @@ async def delete_cluster(cluster_id: str):
     from ..database import db
     from bson import ObjectId
     
+    validate_object_id(cluster_id, "聚類ID")
     database = db.get_db()
-    
-    try:
-        oid = ObjectId(cluster_id)
-    except:
-        return {"success": False, "message": "無效的分類 ID"}
+
+    oid = ObjectId(cluster_id)
 
     await database["questions"].update_many(
         {"cluster_id": cluster_id},  
