@@ -276,7 +276,7 @@ GEMINI_MODEL=gemini-2.0-flash
 # ===== Groq 備援 AI =====
 # 從 https://console.groq.com 取得（免費方案可用）
 GROQ_API_KEY=<你的 Groq API Key>
-GROQ_MODEL=llama-3.1-70b-versatile
+GROQ_MODEL=llama-3.3-70b-versatile
 GROQ_ENABLED=true
 
 # ===== API 伺服器 =====
@@ -395,7 +395,7 @@ Railway 是最簡單的雲端部署方式，適合學生與小型課堂使用。
    | `GEMINI_API_KEY` | Google Gemini API Key | 選填 |
    | `GEMINI_MODEL` | Gemini 模型名稱，預設 `gemini-2.0-flash` | 選填 |
    | `GROQ_API_KEY` | Groq 備援 API Key（[console.groq.com](https://console.groq.com)） | 選填 |
-   | `GROQ_MODEL` | Groq 模型名稱，預設 `llama-3.1-70b-versatile` | 選填 |
+   | `GROQ_MODEL` | Groq 模型名稱，預設 `llama-3.3-70b-versatile` | 選填 |
    | `GROQ_ENABLED` | 是否啟用 Groq 備援，預設 `true` | 選填 |
    | `API_HOST` | `0.0.0.0` | 選填 |
    | `API_PORT` | `8000` | 選填 |

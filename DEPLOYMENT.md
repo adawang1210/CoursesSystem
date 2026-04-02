@@ -80,7 +80,7 @@ LINE_CHANNEL_ACCESS_TOKEN=<你的 LINE Access Token>
 GEMINI_API_KEY=<你的 Gemini API Key>
 GEMINI_MODEL=gemini-2.0-flash
 GROQ_API_KEY=<你的 Groq API Key>
-GROQ_MODEL=llama-3.1-70b-versatile
+GROQ_MODEL=llama-3.3-70b-versatile
 GROQ_ENABLED=true
 API_HOST=0.0.0.0
 API_PORT=8000
@@ -163,7 +163,7 @@ GEMINI_MODEL=gemini-2.0-flash
 
 # Groq 備援 AI
 GROQ_API_KEY=your-groq-api-key
-GROQ_MODEL=llama-3.1-70b-versatile
+GROQ_MODEL=llama-3.3-70b-versatile
 GROQ_ENABLED=true
 ```
 
@@ -414,7 +414,7 @@ LINE_CHANNEL_ACCESS_TOKEN=your-line-token
 GEMINI_API_KEY=your-gemini-key
 GEMINI_MODEL=gemini-2.0-flash
 GROQ_API_KEY=your-groq-key
-GROQ_MODEL=llama-3.1-70b-versatile
+GROQ_MODEL=llama-3.3-70b-versatile
 GROQ_ENABLED=true
 API_HOST=0.0.0.0
 API_PORT=8000

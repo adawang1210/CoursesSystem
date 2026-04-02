@@ -123,7 +123,7 @@ class AIService:
     ) -> Any:
         """
         Groq API 呼叫（OpenAI 相容格式）
-        使用 llama-3.1-70b-versatile 作為備援模型
+        使用 llama-3.3-70b-versatile 作為備援模型
         """
         client = self._get_groq_client()
         model = settings.GROQ_MODEL
