@@ -116,7 +116,7 @@ export async function getLineStats(courseId?: string): Promise<LineStats> {
   const params = courseId ? { course_id: courseId } : {};
   const response = await apiClient.get<{ success: boolean; data: LineStats }>(
     "/line/stats",
-    { params }
+    params
   );
   return response.data;
 }
@@ -158,7 +158,7 @@ export async function getLineMessages(
   const response = await apiClient.get<{
     success: boolean;
     data: LineMessagesResponse;
-  }>("/line/messages", { params });
+  }>("/line/messages", params);
   return response.data;
 }
 
@@ -171,9 +171,7 @@ export async function getMessageStats(
   const response = await apiClient.get<{
     success: boolean;
     data: MessageStatsResponse;
-  }>("/line/message-stats", {
-    params: { days },
-  });
+  }>("/line/message-stats", { days });
   return response.data;
 }
 
