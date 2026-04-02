@@ -102,6 +102,10 @@ class AIService:
                     await asyncio.sleep(delay)
                     continue
 
+                if "429" in error_str or "RESOURCE_EXHAUSTED" in error_str:
+                    logger.error("Gemini API 配額已用盡: %s", error_str)
+                    raise RuntimeError("AI 服務配額已用盡，請稍後再試或升級 API 方案。")
+
                 logger.error("Gemini AI 呼叫失敗: %s", error_str)
                 return None
 

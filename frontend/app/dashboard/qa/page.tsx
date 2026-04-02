@@ -283,8 +283,14 @@ export default function QAPage() {
       } else {
         toast({ title: "啟動失敗", description: "無法啟動 AI 批閱任務", variant: "destructive" });
       }
-    } catch (error) {
-      toast({ title: "錯誤", description: "系統發生錯誤", variant: "destructive" });
+    } catch (error: any) {
+      const detail = error?.message || "系統發生錯誤";
+      const isQuota = detail.includes("配額") || detail.includes("quota");
+      toast({
+        title: isQuota ? "AI 配額已用盡" : "錯誤",
+        description: isQuota ? "Gemini API 免費額度已耗盡，請稍後再試或升級為付費方案。" : detail,
+        variant: "destructive",
+      });
     } finally {
       setIsClustering(false);
     }
@@ -305,8 +311,14 @@ export default function QAPage() {
       } else {
         toast({ title: "啟動失敗", description: "無法啟動 AI 批閱任務", variant: "destructive" });
       }
-    } catch (error) {
-      toast({ title: "錯誤", description: "系統發生錯誤", variant: "destructive" });
+    } catch (error: any) {
+      const detail = error?.message || "系統發生錯誤";
+      const isQuota = detail.includes("配額") || detail.includes("quota");
+      toast({
+        title: isQuota ? "AI 配額已用盡" : "錯誤",
+        description: isQuota ? "Gemini API 免費額度已耗盡，請稍後再試或升級為付費方案。" : detail,
+        variant: "destructive",
+      });
     } finally {
       setIsClustering(false);
     }
@@ -533,330 +545,202 @@ export default function QAPage() {
   const unclusteredApprovedCount = qaReplies.filter(r => r.review_status === 'approved' && !r.cluster_id).length;
   const hasClusteredReplies = qaReplies.some(r => !!r.cluster_id);
 
-  return (
-    <div className="p-8">
-      <h1 className="text-4xl font-bold text-foreground mb-2">Q&A 任務管理</h1>
-      <p className="text-muted-foreground mb-8">發布課後診斷任務，探測學生的理解狀態與迷思概念</p>
+  const [replyFilter, setReplyFilter] = useState<"all" | "pending" | "approved" | "rejected">("all");
+  const [expandedReplyId, setExpandedReplyId] = useState<string | null>(null);
+  const filteredReplies = replyFilter === "all" ? qaReplies : qaReplies.filter(r => (r.review_status || "pending") === replyFilter);
 
-      <div className="flex gap-4 items-center mb-6">
-        <div className="flex-1 relative">
-          <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-          <Input placeholder="搜尋問題或觀念..." value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} className="pl-10" />
+  return (
+    <div className="p-6 h-[calc(100vh-64px)] flex flex-col">
+      <div className="flex items-center justify-between mb-4 shrink-0">
+        <div>
+          <h1 className="text-3xl font-bold text-foreground">Q&A 任務管理</h1>
+          <p className="text-sm text-muted-foreground mt-1">發布課後診斷任務，探測學生的理解狀態與迷思概念</p>
         </div>
-        <Button className="whitespace-nowrap bg-indigo-600 hover:bg-indigo-700 text-white" onClick={handleOpenCreateDialog}>
-          <Plus className="w-4 h-4 mr-2" />
-          發布診斷任務
-        </Button>
+        <div className="flex gap-3 items-center">
+          <div className="relative w-64">
+            <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+            <Input placeholder="搜尋問題或觀念..." value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} className="pl-10 h-9" />
+          </div>
+          <Button className="whitespace-nowrap bg-indigo-600 hover:bg-indigo-700 text-white h-9" onClick={handleOpenCreateDialog}>
+            <Plus className="w-4 h-4 mr-1" /> 發布診斷任務
+          </Button>
+        </div>
       </div>
 
       {isLoading ? (
-        <div className="flex items-center justify-center py-20">
+        <div className="flex items-center justify-center flex-1">
           <Loader2 className="w-8 h-8 animate-spin text-primary" />
           <span className="ml-3 text-muted-foreground">載入中...</span>
         </div>
       ) : (
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          <div className="lg:col-span-2 space-y-3">
+        <div className="flex gap-4 flex-1 min-h-0">
+          <div className="w-[280px] shrink-0 overflow-y-auto space-y-2 pr-1">
             {filteredQAs.length === 0 ? (
-              <Card className="bg-secondary/30 border-dashed">
-                <CardContent className="py-12 text-center">
-                  <MessageCircle className="w-12 h-12 mx-auto text-muted-foreground mb-3 opacity-50" />
-                  <p className="text-muted-foreground mb-4">
-                    {searchQuery ? "找不到符合的 Q&A" : "目前沒有 Q&A 診斷任務"}
-                  </p>
-                  {!searchQuery && (
-                    <Button onClick={handleOpenCreateDialog}>
-                      <Plus className="w-4 h-4 mr-2" />
-                      建立第一個診斷任務
-                    </Button>
-                  )}
-                </CardContent>
-              </Card>
+              <div className="text-center py-12 text-muted-foreground">
+                <MessageCircle className="w-10 h-10 mx-auto mb-2 opacity-40" />
+                <p className="text-sm">{searchQuery ? "找不到符合的 Q&A" : "尚無診斷任務"}</p>
+                {!searchQuery && <Button size="sm" className="mt-3" onClick={handleOpenCreateDialog}><Plus className="w-3 h-3 mr-1" />建立任務</Button>}
+              </div>
             ) : (
               filteredQAs.map((qa) => (
-                <Card key={qa.id} className={`cursor-pointer transition-all border-l-4 ${selectedQA?.id === qa.id ? 'border-l-indigo-600 shadow-md' : 'border-l-transparent hover:shadow-md'}`} onClick={() => setSelectedQA(qa)}>
-                  <CardContent className="pt-6">
-                    <div className="flex items-start justify-between mb-2">
-                      <h3 className="font-semibold text-foreground flex-1 pr-2">{qa.question}</h3>
-                      <div className="flex items-center gap-2">
-                        {qa.allowReplies && isQAActive(qa) && qa.expiresAt && (
-                          <span className="flex items-center text-xs bg-red-500 text-white px-2 py-1 rounded animate-pulse whitespace-nowrap">
-                            <Timer className="w-3 h-3 mr-1" />
-                            {formatTimeLeft(qa.expiresAt)}
-                          </span>
-                        )}
-                        {qa.allowReplies && isQAActive(qa) && !qa.expiresAt && (
-                          <span className="flex items-center text-xs bg-green-500/10 text-green-600 border border-green-200 dark:border-green-900 px-2 py-1 rounded whitespace-nowrap">
-                            <Clock className="w-3 h-3 mr-1" />
-                            任務進行中
-                          </span>
-                        )}
-                        {(!qa.allowReplies || !isQAActive(qa)) && (
-                          <span className="text-xs bg-gray-200 text-gray-600 px-2 py-1 rounded whitespace-nowrap">已結束</span>
-                        )}
-                        {!qa.isPublished && (
-                          <span className="text-xs bg-yellow-500/10 text-yellow-600 px-2 py-1 rounded whitespace-nowrap">草稿</span>
-                        )}
-                      </div>
-                    </div>
-                    <div className="text-sm text-muted-foreground mb-3 line-clamp-2 border-l-2 border-indigo-200 pl-2">
-                      <span className="font-semibold text-indigo-500">核心觀念：</span>{qa.coreConcept}
-                    </div>
-                    <div className="flex justify-between items-center text-xs">
-                      <div className="flex gap-2 flex-wrap">
-                        {qa.tags.slice(0, 3).map((tag, idx) => (
-                          <span key={idx} className="bg-secondary text-secondary-foreground px-2 py-1 rounded">{tag}</span>
-                        ))}
-                      </div>
-                      <span className="bg-primary/10 text-primary px-2 py-1 rounded">{qa.course}</span>
-                    </div>
-                  </CardContent>
-                </Card>
+                <div key={qa.id} onClick={() => setSelectedQA(qa)} className={`p-3 rounded-lg border cursor-pointer transition-all ${selectedQA?.id === qa.id ? 'border-indigo-500 bg-indigo-50/50 dark:bg-indigo-950/20 shadow-sm' : 'border-border hover:border-indigo-300 hover:shadow-sm'}`}>
+                  <p className="text-sm font-medium line-clamp-2 mb-1.5">{qa.question}</p>
+                  <div className="flex items-center justify-between">
+                    <span className="text-[11px] bg-primary/10 text-primary px-1.5 py-0.5 rounded truncate max-w-[120px]">{qa.course}</span>
+                    {qa.allowReplies && isQAActive(qa) ? (
+                      <span className="text-[10px] bg-green-500/10 text-green-600 px-1.5 py-0.5 rounded">進行中</span>
+                    ) : (
+                      <span className="text-[10px] bg-gray-200 text-gray-500 px-1.5 py-0.5 rounded">已結束</span>
+                    )}
+                  </div>
+                </div>
               ))
             )}
           </div>
 
-          <div className="lg:col-span-1">
+          <div className="flex-1 flex flex-col min-h-0 min-w-0">
             {selectedQA ? (
-              <Card className="sticky top-8">
-                <CardHeader>
-                  <CardTitle className="text-lg">任務詳細資訊</CardTitle>
-                </CardHeader>
-                <CardContent className="space-y-4">
-                  {selectedQA.allowReplies && (
-                     <div className={`p-4 rounded-lg border ${isQAActive(selectedQA) ? 'bg-indigo-50 border-indigo-100 dark:bg-indigo-950/20' : 'bg-secondary/50'}`}>
-                        <div className="flex items-center justify-between mb-2">
-                           <span className="font-semibold flex items-center text-sm">
-                             <Clock className="w-4 h-4 mr-2" />
-                             LINE 互動任務
-                           </span>
-                           <span className={`text-sm font-bold ${isQAActive(selectedQA) ? (selectedQA.expiresAt ? 'text-red-600' : 'text-green-600') : 'text-muted-foreground'}`}>
-                             {isQAActive(selectedQA) ? (selectedQA.expiresAt ? formatTimeLeft(selectedQA.expiresAt) : "進行中 (不限時)") : "已關閉"}
-                           </span>
-                        </div>
-                        {isQAActive(selectedQA) && (
-                          <Button variant="destructive" size="sm" className="w-full mt-2" onClick={() => handleStopQA(selectedQA.id)}>
-                            <StopCircle className="w-4 h-4 mr-2" /> 立即結束任務
-                          </Button>
+              <>
+                <div className="shrink-0 border rounded-lg p-4 mb-3 bg-card">
+                  <div className="flex items-start justify-between gap-4">
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2 mb-2">
+                        <h2 className="text-base font-semibold truncate">{selectedQA.question}</h2>
+                        {selectedQA.allowReplies && isQAActive(selectedQA) ? (
+                          selectedQA.expiresAt ? (
+                            <span className="flex items-center text-[10px] bg-red-500 text-white px-1.5 py-0.5 rounded animate-pulse whitespace-nowrap shrink-0"><Timer className="w-3 h-3 mr-0.5" />{formatTimeLeft(selectedQA.expiresAt)}</span>
+                          ) : (
+                            <span className="text-[10px] bg-green-500/10 text-green-600 border border-green-200 dark:border-green-900 px-1.5 py-0.5 rounded whitespace-nowrap shrink-0">進行中</span>
+                          )
+                        ) : (
+                          <span className="text-[10px] bg-gray-200 text-gray-500 px-1.5 py-0.5 rounded whitespace-nowrap shrink-0">已結束</span>
                         )}
-                     </div>
-                  )}
-
-                  <div>
-                    <p className="text-xs uppercase text-muted-foreground mb-1">老師的提問</p>
-                    <p className="font-medium text-sm p-3 bg-secondary/30 rounded-md">{selectedQA.question}</p>
+                      </div>
+                      <div className="grid grid-cols-2 gap-3">
+                        <div>
+                          <p className="text-[10px] uppercase font-bold text-indigo-600 flex items-center mb-0.5"><Target className="w-3 h-3 mr-0.5" />核心觀念</p>
+                          <p className="text-xs text-foreground/80 line-clamp-2">{selectedQA.coreConcept}</p>
+                        </div>
+                        {selectedQA.expectedMisconceptions && (
+                          <div>
+                            <p className="text-[10px] uppercase font-bold text-orange-600 flex items-center mb-0.5"><Lightbulb className="w-3 h-3 mr-0.5" />探測迷思</p>
+                            <p className="text-xs text-foreground/80 line-clamp-2">{selectedQA.expectedMisconceptions}</p>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                    <div className="flex flex-col gap-1.5 shrink-0">
+                      <Button size="sm" variant="outline" className="h-7 text-xs" onClick={(e) => { e.stopPropagation(); handleOpenEditDialog(selectedQA); }}>編輯</Button>
+                      {isQAActive(selectedQA) && <Button size="sm" variant="destructive" className="h-7 text-xs" onClick={() => handleStopQA(selectedQA.id)}><StopCircle className="w-3 h-3 mr-1" />結束</Button>}
+                      <Button size="sm" variant="ghost" className="h-7 text-xs text-destructive hover:text-destructive" onClick={(e) => { e.stopPropagation(); handleOpenDeleteDialog(selectedQA); }}><Trash2 className="w-3 h-3 mr-1" />刪除</Button>
+                    </div>
                   </div>
+                </div>
 
-                  {selectedQA.allowReplies && (
-                    <div className="pt-2">
+                {selectedQA.allowReplies ? (
+                  <div className="flex-1 flex flex-col min-h-0 border rounded-lg bg-card">
+                    <div className="shrink-0 p-3 border-b">
                       <div className="flex items-center justify-between mb-2">
-                        <p className="text-xs uppercase font-bold text-indigo-600 flex items-center">
-                          <MessageCircle className="w-3 h-3 mr-1" /> 
-                          學生作答清單 ({qaReplies.length})
-                        </p>
-                        
+                        <p className="text-sm font-semibold flex items-center"><MessageCircle className="w-4 h-4 mr-1.5 text-indigo-600" />學生作答 ({qaReplies.length})</p>
                         <div className="flex items-center gap-1">
                           {hasClusteredReplies ? (
                             <>
-                              <Button
-                                variant="outline"
-                                size="sm"
-                                className="h-7 text-xs bg-indigo-50 text-indigo-700 hover:bg-indigo-100 border-indigo-200 dark:bg-indigo-900/30 dark:text-indigo-400 dark:border-indigo-800"
-                                onClick={() => handleRunAIClustering(selectedQA.id, selectedQA.courseId)}
-                                disabled={isClustering}
-                              >
-                                {isClustering ? <Loader2 className="w-3 h-3 mr-1 animate-spin" /> : <Zap className="w-3 h-3 mr-1" />}
-                                AI 診斷 ({unclusteredApprovedCount})
+                              <Button variant="outline" size="sm" className="h-7 text-xs bg-indigo-50 text-indigo-700 hover:bg-indigo-100 border-indigo-200 dark:bg-indigo-900/30 dark:text-indigo-400 dark:border-indigo-800" onClick={() => handleRunAIClustering(selectedQA.id, selectedQA.courseId)} disabled={isClustering}>
+                                {isClustering ? <Loader2 className="w-3 h-3 mr-1 animate-spin" /> : <Zap className="w-3 h-3 mr-1" />}AI 診斷 ({unclusteredApprovedCount})
                               </Button>
-                              <Button
-                                variant="outline"
-                                size="sm"
-                                className="h-7 text-xs text-orange-600 border-orange-200 hover:bg-orange-50 hover:text-orange-700 dark:bg-orange-950/30 dark:border-orange-900 dark:hover:bg-orange-900/50"
-                                onClick={() => setIsReclusterDialogOpen(true)}
-                                disabled={isClustering}
-                                title="清除舊分類並重新分析所有通過的作答"
-                              >
-                                <RotateCcw className={`w-3 h-3 mr-1 ${isClustering ? 'animate-spin' : ''}`} />
-                                重新診斷
+                              <Button variant="outline" size="sm" className="h-7 text-xs text-orange-600 border-orange-200 hover:bg-orange-50 dark:bg-orange-950/30 dark:border-orange-900" onClick={() => setIsReclusterDialogOpen(true)} disabled={isClustering}>
+                                <RotateCcw className={`w-3 h-3 mr-1 ${isClustering ? 'animate-spin' : ''}`} />重新診斷
                               </Button>
                             </>
                           ) : (
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              className="h-7 text-xs bg-indigo-50 text-indigo-700 hover:bg-indigo-100 border-indigo-200 dark:bg-indigo-900/30 dark:text-indigo-400 dark:border-indigo-800"
-                              onClick={() => handleRunAIClustering(selectedQA.id, selectedQA.courseId)}
-                              disabled={isClustering}
-                            >
-                              {isClustering ? <Loader2 className="w-3 h-3 mr-1 animate-spin" /> : <Zap className="w-3 h-3 mr-1" />}
-                              AI 診斷分析
+                            <Button variant="outline" size="sm" className="h-7 text-xs bg-indigo-50 text-indigo-700 hover:bg-indigo-100 border-indigo-200 dark:bg-indigo-900/30 dark:text-indigo-400 dark:border-indigo-800" onClick={() => handleRunAIClustering(selectedQA.id, selectedQA.courseId)} disabled={isClustering}>
+                              {isClustering ? <Loader2 className="w-3 h-3 mr-1 animate-spin" /> : <Zap className="w-3 h-3 mr-1" />}AI 診斷分析
                             </Button>
                           )}
-                          
-                          <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => loadReplies(selectedQA.id)}>
-                            <RefreshCw className={`w-3 h-3 ${isLoadingReplies ? 'animate-spin' : ''}`} />
-                          </Button>
+                          <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => loadReplies(selectedQA.id)}><RefreshCw className={`w-3 h-3 ${isLoadingReplies ? 'animate-spin' : ''}`} /></Button>
                         </div>
                       </div>
-
-                      {qaReplies.length > 0 && (
-                        <div className="flex items-center justify-between bg-secondary/30 p-2 rounded-md mb-2 border border-border">
-                          <div className="flex items-center gap-2">
-                            <Checkbox 
-                              id="select-all" 
-                              checked={selectedReplyIds.length === qaReplies.length && qaReplies.length > 0}
-                              onCheckedChange={(checked) => handleSelectAll(checked as boolean)}
-                            />
-                            <Label htmlFor="select-all" className="text-xs cursor-pointer select-none font-medium">全選</Label>
-                            {selectedReplyIds.length > 0 && (
-                              <span className="text-xs text-muted-foreground ml-2 font-medium">
-                                (已選擇 {selectedReplyIds.length} 筆)
-                              </span>
-                            )}
-                          </div>
+                      <div className="flex items-center justify-between">
+                        <div className="flex gap-1">
+                          {(["all", "pending", "approved", "rejected"] as const).map(f => (
+                            <Button key={f} variant={replyFilter === f ? "default" : "ghost"} size="sm" className={`h-6 text-[11px] px-2 ${replyFilter === f ? 'bg-indigo-600 text-white hover:bg-indigo-700' : ''}`} onClick={() => setReplyFilter(f)}>
+                              {f === "all" ? `全部 (${qaReplies.length})` : f === "pending" ? `待批閱 (${qaReplies.filter(r => (r.review_status || "pending") === "pending").length})` : f === "approved" ? `通過 (${qaReplies.filter(r => r.review_status === "approved").length})` : `退回 (${qaReplies.filter(r => r.review_status === "rejected").length})`}
+                            </Button>
+                          ))}
+                        </div>
+                        <div className="flex items-center gap-1.5">
+                          <Checkbox id="select-all-v2" checked={selectedReplyIds.length === filteredReplies.length && filteredReplies.length > 0} onCheckedChange={(c) => { if (c) { setSelectedReplyIds(filteredReplies.map(r => r._id)); } else { setSelectedReplyIds([]); } }} />
+                          <Label htmlFor="select-all-v2" className="text-[11px] cursor-pointer select-none">全選</Label>
                           {selectedReplyIds.length > 0 && (
-                            <div className="flex items-center gap-2">
-                              <Button 
-                                variant="outline" 
-                                size="sm" 
-                                className="h-6 text-xs bg-green-50 text-green-700 hover:bg-green-100 border-green-200 dark:bg-green-900/30 dark:text-green-400 dark:border-green-800"
-                                onClick={() => handleBatchReview("approved")}
-                                disabled={isSubmittingReview}
-                              >
-                                {isSubmittingReview ? <Loader2 className="w-3 h-3 mr-1 animate-spin" /> : <CheckCircle2 className="w-3 h-3 mr-1"/>}
-                                通過
-                              </Button>
-                              <Button 
-                                variant="outline" 
-                                size="sm" 
-                                className="h-6 text-xs bg-red-50 text-red-700 hover:bg-red-100 border-red-200 dark:bg-red-900/30 dark:text-red-400 dark:border-red-800"
-                                onClick={() => handleBatchReview("rejected")}
-                                disabled={isSubmittingReview}
-                              >
-                                {isSubmittingReview ? <Loader2 className="w-3 h-3 mr-1 animate-spin" /> : <XCircle className="w-3 h-3 mr-1"/>}
-                                退回
-                              </Button>
-                            </div>
+                            <>
+                              <span className="text-[11px] text-muted-foreground">({selectedReplyIds.length})</span>
+                              <Button variant="outline" size="sm" className="h-6 text-[11px] px-2 bg-green-50 text-green-700 hover:bg-green-100 border-green-200 dark:bg-green-900/30 dark:text-green-400" onClick={() => handleBatchReview("approved")} disabled={isSubmittingReview}><CheckCircle2 className="w-3 h-3 mr-0.5" />通過</Button>
+                              <Button variant="outline" size="sm" className="h-6 text-[11px] px-2 bg-red-50 text-red-700 hover:bg-red-100 border-red-200 dark:bg-red-900/30 dark:text-red-400" onClick={() => handleBatchReview("rejected")} disabled={isSubmittingReview}><XCircle className="w-3 h-3 mr-0.5" />退回</Button>
+                            </>
                           )}
                         </div>
-                      )}
-                      
-                      <div className="space-y-2 max-h-[300px] overflow-y-auto pr-1 pb-1">
-                        {isLoadingReplies && qaReplies.length === 0 ? (
-                           <div className="text-center py-4"><Loader2 className="w-4 h-4 animate-spin mx-auto text-muted-foreground" /></div>
-                        ) : qaReplies.length === 0 ? (
-                           <p className="text-xs text-muted-foreground text-center py-4 border border-dashed rounded-md">尚無學生回覆</p>
-                        ) : (
-                           qaReplies.map(reply => {
-                             const ensureUTC = (dateStr?: string) => dateStr ? (dateStr.endsWith('Z') ? dateStr : `${dateStr}Z`) : undefined;
-                             const replyTime = new Date(ensureUTC(reply.created_at) || reply.created_at);
-                             const status = reply.review_status || "pending";
-                             const isSelected = selectedReplyIds.includes(reply._id);
-
-                             return (
-                               <div key={reply._id} className={`flex flex-row p-3 bg-card rounded-lg border shadow-sm group hover:border-indigo-300 transition-colors gap-3 ${isSelected ? 'border-indigo-500 bg-indigo-50/10 dark:bg-indigo-950/20' : ''}`}>
-                                  <div className="pt-0.5">
-                                    <Checkbox 
-                                      checked={isSelected}
-                                      onCheckedChange={() => handleToggleSelect(reply._id)}
-                                    />
-                                  </div>
-
-                                  <div className="flex-1 flex flex-col min-w-0">
-                                    <div className="flex justify-between items-center mb-1">
-                                      <div className="flex items-center gap-2">
-                                        {/* =========== 🔥 修正：把太長的代號縮短 =========== */}
-                                        <span className="text-xs font-bold text-foreground">
-                                          <span title={reply.pseudonym}>
-                                            {reply.pseudonym?.length > 12 ? `${reply.pseudonym.substring(0, 8)}...` : reply.pseudonym}
-                                          </span>
-                                          {reply.student_id && <span className="text-muted-foreground font-normal ml-1">({reply.student_id})</span>}
-                                        </span>
-                                        {/* ================================================= */}
-                                        {status === 'approved' && <span className="text-[10px] flex items-center bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400 px-1.5 py-0.5 rounded"><CheckCircle2 className="w-3 h-3 mr-0.5"/>通過</span>}
-                                        {status === 'rejected' && <span className="text-[10px] flex items-center bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400 px-1.5 py-0.5 rounded"><XCircle className="w-3 h-3 mr-0.5"/>退回</span>}
-                                        {status === 'pending' && <span className="text-[10px] bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400 px-1.5 py-0.5 rounded">待批閱</span>}
-                                      </div>
-                                      <span className="text-[10px] text-muted-foreground whitespace-nowrap ml-2">
-                                        {replyTime.toLocaleTimeString('zh-TW', {hour: '2-digit', minute:'2-digit'})}
-                                      </span>
-                                    </div>
-                                    <p className="text-sm text-foreground/90 my-1 whitespace-pre-wrap">{reply.question_text}</p>
-                                    
-                                    {reply.feedback && (
-                                      <div className="mt-1 p-2 bg-indigo-50/50 dark:bg-indigo-900/10 rounded border border-indigo-100 dark:border-indigo-900/50">
-                                        <p className="text-xs text-indigo-700 dark:text-indigo-400"><span className="font-semibold">評語：</span>{reply.feedback}</p>
-                                      </div>
-                                    )}
-
-                                    <div className="flex justify-end mt-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                                      <Button variant="secondary" size="sm" className="h-6 text-xs" onClick={() => handleOpenReviewDialog(reply)}>
-                                        {status === 'pending' ? '進行單筆批閱' : '修改批閱與評語'}
-                                      </Button>
-                                    </div>
-                                  </div>
-                               </div>
-                             );
-                           })
-                        )}
                       </div>
                     </div>
-                  )}
-
-                  <div className="pt-4 border-t mt-4">
-                    <p className="text-xs uppercase font-bold text-indigo-600 flex items-center mb-2">
-                      <Target className="w-4 h-4 mr-1" /> 期望的核心觀念
-                    </p>
-                    <p className="text-sm p-3 bg-indigo-50/50 dark:bg-indigo-950/20 border border-indigo-100 dark:border-indigo-900 rounded-md whitespace-pre-wrap text-foreground/90">
-                      {selectedQA.coreConcept}
-                    </p>
+                    <div className="flex-1 overflow-y-auto p-3 space-y-2">
+                      {isLoadingReplies && qaReplies.length === 0 ? (
+                        <div className="text-center py-8"><Loader2 className="w-5 h-5 animate-spin mx-auto text-muted-foreground" /></div>
+                      ) : filteredReplies.length === 0 ? (
+                        <p className="text-xs text-muted-foreground text-center py-8 border border-dashed rounded-md">{qaReplies.length === 0 ? "尚無學生回覆" : "此篩選條件下無回覆"}</p>
+                      ) : (
+                        filteredReplies.map(reply => {
+                          const ensureUTC = (dateStr?: string) => dateStr ? (dateStr.endsWith('Z') ? dateStr : `${dateStr}Z`) : undefined;
+                          const replyTime = new Date(ensureUTC(reply.created_at) || reply.created_at);
+                          const status = reply.review_status || "pending";
+                          const isSelected = selectedReplyIds.includes(reply._id);
+                          const isExpanded = expandedReplyId === reply._id;
+                          return (
+                            <div key={reply._id} className={`p-3 bg-card rounded-lg border shadow-sm transition-colors ${isSelected ? 'border-indigo-500 bg-indigo-50/10 dark:bg-indigo-950/20' : 'hover:border-indigo-300'}`}>
+                              <div className="flex items-start gap-2">
+                                <Checkbox className="mt-0.5" checked={isSelected} onCheckedChange={() => handleToggleSelect(reply._id)} />
+                                <div className="flex-1 min-w-0">
+                                  <div className="flex items-center justify-between mb-1">
+                                    <div className="flex items-center gap-1.5 min-w-0">
+                                      <span className="text-xs font-bold truncate" title={reply.pseudonym}>{reply.pseudonym?.length > 12 ? `${reply.pseudonym.substring(0, 8)}...` : reply.pseudonym}</span>
+                                      {reply.student_id && <span className="text-[11px] text-muted-foreground">({reply.student_id})</span>}
+                                      {status === 'approved' && <span className="text-[10px] flex items-center bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400 px-1 py-0.5 rounded"><CheckCircle2 className="w-2.5 h-2.5 mr-0.5"/>通過</span>}
+                                      {status === 'rejected' && <span className="text-[10px] flex items-center bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400 px-1 py-0.5 rounded"><XCircle className="w-2.5 h-2.5 mr-0.5"/>退回</span>}
+                                      {status === 'pending' && <span className="text-[10px] bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400 px-1 py-0.5 rounded">待批閱</span>}
+                                    </div>
+                                    <span className="text-[10px] text-muted-foreground whitespace-nowrap ml-2">{replyTime.toLocaleTimeString('zh-TW', {hour: '2-digit', minute:'2-digit'})}</span>
+                                  </div>
+                                  <p className={`text-sm text-foreground/90 cursor-pointer ${isExpanded ? 'whitespace-pre-wrap' : 'line-clamp-2'}`} onClick={() => setExpandedReplyId(isExpanded ? null : reply._id)}>{reply.question_text}</p>
+                                  {reply.feedback && (
+                                    <div className="mt-1.5 p-1.5 bg-indigo-50/50 dark:bg-indigo-900/10 rounded border border-indigo-100 dark:border-indigo-900/50">
+                                      <p className="text-[11px] text-indigo-700 dark:text-indigo-400"><span className="font-semibold">評語：</span>{reply.feedback}</p>
+                                    </div>
+                                  )}
+                                  <div className="flex justify-end mt-1.5">
+                                    <Button variant="secondary" size="sm" className="h-6 text-[11px]" onClick={() => handleOpenReviewDialog(reply)}>{status === 'pending' ? '批閱' : '修改批閱'}</Button>
+                                  </div>
+                                </div>
+                              </div>
+                            </div>
+                          );
+                        })
+                      )}
+                    </div>
                   </div>
-                  
-                  {selectedQA.expectedMisconceptions && (
-                    <div className="pt-2 mt-2">
-                      <p className="text-xs uppercase font-bold text-orange-600 flex items-center mb-2">
-                        <Lightbulb className="w-4 h-4 mr-1" /> 探測迷思 / 分析重點
-                      </p>
-                      <p className="text-sm p-3 bg-orange-50/50 dark:bg-orange-950/20 border border-orange-100 dark:border-orange-900 rounded-md whitespace-pre-wrap text-foreground/90">
-                        {selectedQA.expectedMisconceptions}
-                      </p>
-                    </div>
-                  )}
-                  
-                  <div className="grid grid-cols-3 gap-2 pt-4 border-t">
-                    <div>
-                      <p className="text-xs text-muted-foreground flex items-center"><Hash className="w-3 h-3 mr-1"/>作答次數限制</p>
-                      <p className="font-medium text-sm mt-1">
-                        {selectedQA.maxAttempts && selectedQA.maxAttempts > 0 ? `${selectedQA.maxAttempts} 次` : "無限制"}
-                      </p>
-                    </div>
-                    <div>
-                      <p className="text-xs text-muted-foreground">發布狀態</p>
-                      <span className={`text-xs px-2 py-1 rounded inline-block mt-1 ${selectedQA.isPublished ? "bg-green-500/10 text-green-600" : "bg-yellow-500/10 text-yellow-600"}`}>
-                        {selectedQA.isPublished ? "已發布" : "草稿"}
-                      </span>
-                    </div>
-                    <div>
-                      <p className="text-xs text-muted-foreground">最後更新</p>
-                      <p className="font-medium text-sm mt-1">{selectedQA.lastUpdated}</p>
+                ) : (
+                  <div className="flex-1 flex items-center justify-center border rounded-lg bg-secondary/20">
+                    <div className="text-center">
+                      <MessageCircle className="w-10 h-10 mx-auto text-muted-foreground mb-2 opacity-40" />
+                      <p className="text-sm text-muted-foreground">此任務未開放 LINE 互動作答</p>
                     </div>
                   </div>
-
-                  <div className="flex gap-2 pt-2">
-                    <Button className="flex-1" variant="outline" onClick={(e) => { e.stopPropagation(); handleOpenEditDialog(selectedQA); }}>編輯設定</Button>
-                    <Button variant="destructive" className="flex-1" onClick={(e) => { e.stopPropagation(); handleOpenDeleteDialog(selectedQA); }}>
-                      <Trash2 className="w-4 h-4 mr-2" /> 刪除任務
-                    </Button>
-                  </div>
-                </CardContent>
-              </Card>
+                )}
+              </>
             ) : (
-              <Card className="bg-secondary/30 border-dashed flex items-center justify-center min-h-[600px]">
-                <CardContent className="text-center">
-                  <Target className="w-12 h-12 mx-auto text-muted-foreground mb-3 opacity-50" />
+              <div className="flex-1 flex items-center justify-center border rounded-lg border-dashed bg-secondary/20">
+                <div className="text-center">
+                  <Target className="w-12 h-12 mx-auto text-muted-foreground mb-3 opacity-40" />
                   <p className="text-muted-foreground">選擇左側任務查看詳細的診斷設定</p>
-                </CardContent>
-              </Card>
+                </div>
+              </div>
             )}
           </div>
         </div>
