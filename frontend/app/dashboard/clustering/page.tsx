@@ -10,10 +10,9 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import {
-  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
-  ScatterChart, Scatter, ZAxis
+  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
 } from "recharts"
-import { Zap, RefreshCw, AlertCircle, Pencil, Plus, Trash2, Sparkles, Lock, Unlock, MessageCircle, RotateCcw, AlertTriangle, Target, Lightbulb, CheckCircle2, ChevronDown, ChevronUp, Loader2 } from "lucide-react" 
+import { Zap, RefreshCw, AlertCircle, Pencil, Plus, Trash2, Sparkles, Lock, Unlock, MessageCircle, RotateCcw, AlertTriangle, Target, Lightbulb, CheckCircle2, ChevronDown, ChevronUp, Loader2 } from "lucide-react"
 import { Slider } from "@/components/ui/slider"
 import { Label } from "@/components/ui/label"
 import { Input } from "@/components/ui/input" 
@@ -272,7 +271,6 @@ export default function ClusteringPage() {
     return {
       name: c.topic_label || `主題 ${cId.substring(0, 4)}`,
       questions: c.question_count,
-      difficulty: Number((c.avg_difficulty || 0).toFixed(2)),
     }
   })
 
@@ -396,7 +394,7 @@ export default function ClusteringPage() {
         </Card>
       )}
 
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8">
+      <div className="grid grid-cols-2 gap-4 mb-6">
         <Card>
           <CardContent className="pt-6">
             <p className="text-sm text-muted-foreground">分群數量</p>
@@ -408,16 +406,6 @@ export default function ClusteringPage() {
             <p className="text-sm text-muted-foreground">已歸類總數</p>
             <p className="text-3xl font-bold text-accent">
               {clusters.reduce((sum, c) => sum + c.question_count, 0)}
-            </p>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="pt-6">
-            <p className="text-sm text-muted-foreground">平均難度</p>
-            <p className="text-3xl font-bold text-orange-600">
-              {clusters.length > 0 
-                ? (clusters.reduce((sum, c) => sum + c.avg_difficulty, 0) / clusters.length).toFixed(2) 
-                : "0.00"}
             </p>
           </CardContent>
         </Card>
@@ -434,43 +422,43 @@ export default function ClusteringPage() {
       )}
 
       {clusters.length > 0 && (
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
-            <Card>
+          <Card className="mb-6">
             <CardHeader>
                 <CardTitle>各群組人數分佈</CardTitle>
             </CardHeader>
             <CardContent>
-                <ResponsiveContainer width="100%" height={300}>
-                <BarChart data={chartData} layout="vertical">
+                <ResponsiveContainer width="100%" height={Math.max(250, chartData.length * 50)}>
+                <BarChart data={chartData} layout="vertical" margin={{ left: 20 }}>
                     <CartesianGrid strokeDasharray="3 3" horizontal={false} />
                     <XAxis type="number" />
-                    <YAxis dataKey="name" type="category" width={120} tick={{fontSize: 12}} />
+                    <YAxis
+                      dataKey="name"
+                      type="category"
+                      width={180}
+                      tick={({ x, y, payload }: any) => {
+                        const label = payload.value || "";
+                        const maxChars = 14;
+                        const lines: string[] = [];
+                        for (let i = 0; i < label.length; i += maxChars) {
+                          lines.push(label.slice(i, i + maxChars));
+                        }
+                        return (
+                          <g transform={`translate(${x},${y})`}>
+                            {lines.map((line: string, idx: number) => (
+                              <text key={idx} x={-4} y={idx * 16 - ((lines.length - 1) * 8)} textAnchor="end" fill="currentColor" fontSize={12}>
+                                {line}
+                              </text>
+                            ))}
+                          </g>
+                        );
+                      }}
+                    />
                     <Tooltip />
                     <Bar dataKey="questions" fill="#4f46e5" name="包含數量" radius={[0, 4, 4, 0]} />
                 </BarChart>
                 </ResponsiveContainer>
             </CardContent>
-            </Card>
-
-            <Card>
-            <CardHeader>
-                <CardTitle>難度 vs 數量分佈</CardTitle>
-            </CardHeader>
-            <CardContent>
-                <ResponsiveContainer width="100%" height={300}>
-                <ScatterChart margin={{ top: 20, right: 20, bottom: 20, left: 20 }}>
-                    <CartesianGrid strokeDasharray="3 3" />
-                    <XAxis type="number" dataKey="questions" name="數量" />
-                    <YAxis type="number" dataKey="difficulty" name="平均難度" domain={[0, 1]} />
-                    <ZAxis type="category" dataKey="name" name="主題" />
-                    <Tooltip cursor={{ strokeDasharray: '3 3' }} />
-                    <Legend />
-                    <Scatter name="群組" data={chartData} fill="#ff7300" />
-                </ScatterChart>
-                </ResponsiveContainer>
-            </CardContent>
-            </Card>
-        </div>
+          </Card>
       )}
 
       {clusters.length > 0 && (
@@ -531,17 +519,6 @@ export default function ClusteringPage() {
                           <p className="text-sm text-muted-foreground mt-1">
                               包含 {cluster.question_count} 個作答/提問
                           </p>
-                          </div>
-                          <div className="text-right">
-                          <div className="flex items-center gap-2 mb-1 justify-end">
-                              <span className="text-sm text-muted-foreground">平均難度</span>
-                              <span className={`text-sm font-bold ${
-                              cluster.avg_difficulty > 0.7 ? 'text-red-500' : 
-                              cluster.avg_difficulty > 0.4 ? 'text-yellow-600' : 'text-green-600'
-                              }`}>
-                              {cluster.avg_difficulty.toFixed(2)}
-                              </span>
-                          </div>
                           </div>
                       </div>
                       

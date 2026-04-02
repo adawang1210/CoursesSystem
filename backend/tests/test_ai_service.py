@@ -27,9 +27,9 @@ class TestAIServiceBasic:
     async def test_missing_api_key_raises_value_error(self):
         """Req 3.3: Empty GEMINI_API_KEY raises ValueError"""
         service = AIService()
-        service.api_key = ""
-        with pytest.raises(ValueError, match="GEMINI_API_KEY"):
-            await service._call_gemini("test prompt")
+        with patch("app.config.settings.GEMINI_API_KEY", ""):
+            with pytest.raises(ValueError, match="GEMINI_API_KEY"):
+                await service._call_gemini("test prompt")
 
     def test_all_methods_are_async(self):
         """Req 9.3: All AI methods are async coroutines"""
@@ -136,10 +136,9 @@ class TestCallGemini:
                 await service._call_gemini("test")
 
     @pytest.mark.asyncio
-    async def test_all_retries_fail_returns_none(self):
-        """Req 11.3: All retries failing returns None"""
+    async def test_all_retries_fail_raises_runtime_error(self):
+        """Req 11.3: All retries failing raises RuntimeError"""
         service = AIService()
-        service.api_key = "test-key"
 
         async def always_fail(*args, **kwargs):
             raise Exception("503 Service Unavailable")
@@ -148,9 +147,8 @@ class TestCallGemini:
             with patch("asyncio.sleep", new_callable=AsyncMock):
                 with patch("app.config.settings.GEMINI_RETRY_MAX_ATTEMPTS", 3):
                     with patch("app.config.settings.GEMINI_RETRY_BASE_DELAY", 0.01):
-                        result = await service._call_gemini("test")
-
-        assert result is None
+                        with pytest.raises(RuntimeError):
+                            await service._call_gemini("test")
 
     @pytest.mark.asyncio
     async def test_retry_logs_attempt_number(self):

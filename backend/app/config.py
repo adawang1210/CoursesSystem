@@ -41,6 +41,12 @@ class Settings(BaseSettings):
     GROQ_API_KEY: str = ""
     GROQ_MODEL: str = "llama-3.3-70b-versatile"
     GROQ_ENABLED: bool = True
+    GROQ_RETRY_MAX_ATTEMPTS: int = 2
+    GROQ_RETRY_BASE_DELAY: float = 1.0
+    GROQ_TIMEOUT_SECONDS: float = 30.0
+    
+    # AI 共用設定
+    AI_ANSWER_MAX_CHARS: int = 300
     
     class Config:
         env_file = ".env"
