@@ -15,6 +15,7 @@ from linebot.v3.messaging import (
     AsyncApiClient,
     AsyncMessagingApi,
     ReplyMessageRequest,
+    PushMessageRequest,
     TextMessage
 )
 from linebot.v3.webhooks import (
@@ -268,7 +269,7 @@ async def get_line_messages(
     if user_id:
         query["user_id"] = user_id
     
-    cursor = messages_collection.find(query).sort("created_at", -1).skip(offset).limit(limit)
+    cursor = messages_collection.find(query).sort("created_at", 1).skip(offset).limit(limit)
     messages = await cursor.to_list(length=limit)
     
     for msg in messages:
@@ -340,6 +341,59 @@ async def get_message_stats(days: int = 7):
             "daily_user_stats": user_stats
         }
     }
+
+
+@router.post("/send-message", summary="發送訊息給 LINE 使用者")
+async def send_line_message(request: Request):
+    body = await request.json()
+    user_id = body.get("user_id")
+    message = body.get("message")
+
+    if not user_id or not message:
+        raise HTTPException(status_code=400, detail="缺少 user_id 或 message")
+
+    if not settings.LINE_CHANNEL_ACCESS_TOKEN:
+        raise HTTPException(status_code=500, detail="LINE Bot 尚未配置")
+
+    database = db.get_db()
+    messages_collection = database["line_messages"]
+
+    try:
+        async with AsyncApiClient(configuration) as api_client:
+            line_bot_api = AsyncMessagingApi(api_client)
+            await line_bot_api.push_message(
+                PushMessageRequest(
+                    to=user_id,
+                    messages=[TextMessage(text=message)]
+                )
+            )
+
+        from ..utils.security import generate_pseudonym
+        pseudonym = generate_pseudonym(user_id)
+        await messages_collection.insert_one({
+            "user_id": user_id,
+            "pseudonym": pseudonym,
+            "message_type": "text",
+            "direction": "sent",
+            "content": message,
+            "created_at": datetime.utcnow()
+        })
+
+        return {"success": True, "message": "訊息已發送"}
+    except Exception as e:
+        # 記錄失敗的訊息
+        from ..utils.security import generate_pseudonym
+        pseudonym = generate_pseudonym(user_id)
+        await messages_collection.insert_one({
+            "user_id": user_id,
+            "pseudonym": pseudonym,
+            "message_type": "text",
+            "direction": "failed",
+            "content": message,
+            "error_message": str(e),
+            "created_at": datetime.utcnow()
+        })
+        return {"success": False, "message": f"發送失敗: {str(e)}"}
 
 
 @router.post("/test-connection", summary="測試 LINE Bot 連接")

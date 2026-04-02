@@ -1,5 +1,5 @@
 "use client";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -33,6 +33,7 @@ import {
   getLineMessages,
   getMessageStats,
   getLineUsers,
+  sendLineMessage,
   coursesApi, 
   type Course, 
   type LineMessage as ApiLineMessage,
@@ -106,6 +107,7 @@ export default function LineIntegrationPage() {
   const [messageStats, setMessageStats] = useState<DailyMessageStat[]>([]);
   const [dailyStats, setDailyStats] = useState<DailyActivityStat[]>([]);
   const [userLabels, setUserLabels] = useState<Record<string, string>>({});
+  const messagesEndRef = useRef<HTMLDivElement>(null);
   const { toast } = useToast();
 
   useEffect(() => {
@@ -124,6 +126,10 @@ export default function LineIntegrationPage() {
       loadMessages();
     }
   }, [selectedUser]);
+
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [messages]);
 
   const loadLineConfig = async () => {
     try {
@@ -350,17 +356,30 @@ export default function LineIntegrationPage() {
     });
   };
 
-  const handleSendMessage = () => {
-    if (newMessage.trim()) {
-      const message: LineMessage = {
-        id: String(messages.length + 1),
-        sender: "系統",
-        content: newMessage,
-        timestamp: new Date().toLocaleString(),
-        status: "sent",
-      };
-      setMessages([...messages, message]);
-      setNewMessage("");
+  const handleSendMessage = async () => {
+    if (!newMessage.trim() || !selectedUser) return;
+
+    const messageText = newMessage.trim();
+    setNewMessage("");
+
+    try {
+      const result = await sendLineMessage(selectedUser.user_id, messageText);
+      if (!result.success) {
+        toast({
+          title: "發送失敗",
+          description: result.message,
+          variant: "destructive",
+        });
+      }
+      // 重新載入訊息以顯示已儲存的記錄
+      await loadMessages(selectedUser.user_id);
+    } catch (error) {
+      console.error("發送訊息失敗:", error);
+      toast({
+        title: "錯誤",
+        description: "發送訊息失敗，請稍後再試",
+        variant: "destructive",
+      });
     }
   };
 
@@ -847,6 +866,7 @@ export default function LineIntegrationPage() {
                         )}
                       </div>
                     )}
+                    <div ref={messagesEndRef} />
                   </div>
 
                   {/* Message Input */}
