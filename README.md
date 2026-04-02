@@ -56,6 +56,7 @@
 | passlib + bcrypt | 1.7.4 / 4.1.1 | 密碼加密 |
 | line-bot-sdk | 3.6.0 | LINE Messaging API |
 | google-genai | ≥1.0.0 | Google Gemini AI SDK |
+| groq | ≥0.4.0 | Groq 備援 AI SDK |
 | pandas | ≥2.2.2 | CSV 匯出 |
 | openpyxl | 3.1.2 | Excel 支援 |
 
@@ -80,7 +81,8 @@
 ### 外部服務
 | 服務 | 用途 |
 |------|------|
-| Google Gemini API | AI 聚類分析、回覆草稿生成 |
+| Google Gemini API | AI 聚類分析、回覆草稿生成（主要） |
+| Groq API | AI 備援服務（Gemini 不可用時自動切換） |
 | LINE Messaging API | 學生互動推播 |
 | ngrok（開發用） | 本地 HTTPS 隧道 |
 
@@ -107,7 +109,7 @@ CoursesSystem/
 │   │   ├── models/
 │   │   │   └── schemas.py            # Pydantic 資料模型定義
 │   │   ├── services/                 # 業務邏輯層
-│   │   │   ├── ai_service.py         #   Google Gemini API 呼叫、聚類分析
+│   │   │   ├── ai_service.py         #   AI 呼叫（Gemini 主要 + Groq 備援）
 │   │   │   ├── course_service.py     #   課程與班級服務
 │   │   │   ├── export_service.py     #   CSV 匯出服務
 │   │   │   ├── line_service.py       #   LINE 訊息處理、推播
@@ -271,6 +273,12 @@ LINE_CHANNEL_ACCESS_TOKEN=<你的 Channel Access Token>
 GEMINI_API_KEY=<你的 Gemini API Key>
 GEMINI_MODEL=gemini-2.0-flash
 
+# ===== Groq 備援 AI =====
+# 從 https://console.groq.com 取得（免費方案可用）
+GROQ_API_KEY=<你的 Groq API Key>
+GROQ_MODEL=llama-3.1-70b-versatile
+GROQ_ENABLED=true
+
 # ===== API 伺服器 =====
 API_HOST=0.0.0.0
 API_PORT=8000
@@ -386,6 +394,9 @@ Railway 是最簡單的雲端部署方式，適合學生與小型課堂使用。
    | `LINE_CHANNEL_ACCESS_TOKEN` | LINE Bot Access Token | 選填 |
    | `GEMINI_API_KEY` | Google Gemini API Key | 選填 |
    | `GEMINI_MODEL` | Gemini 模型名稱，預設 `gemini-2.0-flash` | 選填 |
+   | `GROQ_API_KEY` | Groq 備援 API Key（[console.groq.com](https://console.groq.com)） | 選填 |
+   | `GROQ_MODEL` | Groq 模型名稱，預設 `llama-3.1-70b-versatile` | 選填 |
+   | `GROQ_ENABLED` | 是否啟用 Groq 備援，預設 `true` | 選填 |
    | `API_HOST` | `0.0.0.0` | 選填 |
    | `API_PORT` | `8000` | 選填 |
    | `CORS_ORIGINS` | 前端服務的 Railway URL | ✅ |
@@ -589,6 +600,8 @@ db.courses.createIndex({ "course_code": 1, "semester": 1 })
 ### AI 聚類分析無結果
 - 確認 `.env` 中 `GEMINI_API_KEY` 已設定且有效
 - 可從 [Google AI Studio](https://aistudio.google.com/apikey) 免費取得 API Key
+- 若 Gemini 配額用盡，系統會自動切換至 Groq 備援（需設定 `GROQ_API_KEY`）
+- 可從 [Groq Console](https://console.groq.com) 免費取得 Groq API Key
 - 確認有已通過批閱（approved）的學生作答可供分析
 - 查看後端 Console 是否有 Gemini API 呼叫錯誤
 

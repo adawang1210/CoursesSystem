@@ -142,19 +142,18 @@ class TestFullClusteringPipeline:
 
     @pytest.mark.asyncio
     async def test_gemini_error_returns_empty_clusters(self):
-        """Req 5.2, 5.3: When Gemini fails, perform_qa_answer_clustering returns empty clusters"""
+        """Req 5.2, 5.3: When all AI services fail, perform_qa_answer_clustering raises RuntimeError"""
         from app.services.ai_service import AIService
 
         service = AIService()
-        with patch.object(service, "_call_gemini", new_callable=AsyncMock) as mock_gemini:
-            mock_gemini.return_value = None
-            result = await service.perform_qa_answer_clustering(
-                student_answers=["answer1"],
-                teacher_question="test",
-                core_concept="test",
-            )
-
-        assert result == {"clusters": []}
+        with patch.object(service, "_call_ai", new_callable=AsyncMock) as mock_ai:
+            mock_ai.side_effect = RuntimeError("All AI services unavailable")
+            with pytest.raises(RuntimeError):
+                await service.perform_qa_answer_clustering(
+                    student_answers=["answer1"],
+                    teacher_question="test",
+                    core_concept="test",
+                )
 
     @pytest.mark.asyncio
     async def test_missing_clusters_key_in_api_endpoint(self):

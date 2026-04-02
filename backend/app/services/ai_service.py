@@ -1,6 +1,6 @@
 """
 AI 服務模組
-使用 Google Gemini API（google-genai SDK）提供 AI 聚類分析、回覆草稿生成等功能
+主要使用 Google Gemini API，當 Gemini 不可用時自動切換至 Groq 備援
 """
 import asyncio
 import json
@@ -18,6 +18,7 @@ class AIService:
         self.api_key = settings.GEMINI_API_KEY
         self.model_name = settings.GEMINI_MODEL
         self._client = None
+        self._groq_client = None
 
     def _get_client(self) -> genai.Client:
         """取得或建立 Gemini Client 實例"""
@@ -27,6 +28,15 @@ class AIService:
             self._client = genai.Client(api_key=self.api_key)
         return self._client
 
+    def _get_groq_client(self):
+        """取得或建立 Groq Client 實例"""
+        if self._groq_client is None:
+            if not settings.GROQ_API_KEY:
+                raise ValueError("系統設定錯誤：缺少 GROQ_API_KEY")
+            from groq import Groq
+            self._groq_client = Groq(api_key=settings.GROQ_API_KEY)
+        return self._groq_client
+
     async def _call_gemini(
         self,
         prompt: str,
@@ -35,13 +45,6 @@ class AIService:
     ) -> Any:
         """
         非同步 Gemini API 呼叫，含重試與逾時機制
-
-        Args:
-            prompt: 完整的提示文字（含系統指令與使用者輸入）
-            json_mode: 是否要求回傳 JSON 格式
-            temperature: 生成溫度
-        Returns:
-            str 或 dict（json_mode=True 時）或 None（失敗時）
         """
         if not self.api_key:
             raise ValueError("系統設定錯誤：缺少 GEMINI_API_KEY")
@@ -104,7 +107,7 @@ class AIService:
 
                 if "429" in error_str or "RESOURCE_EXHAUSTED" in error_str:
                     logger.error("Gemini API 配額已用盡: %s", error_str)
-                    raise RuntimeError("AI 服務配額已用盡，請稍後再試或升級 API 方案。")
+                    raise RuntimeError("Gemini 配額已用盡")
 
                 logger.error("Gemini AI 呼叫失敗: %s", error_str)
                 return None
@@ -112,21 +115,96 @@ class AIService:
         logger.error("Gemini API 所有 %d 次重試均失敗", max_attempts)
         return None
 
+    async def _call_groq(
+        self,
+        prompt: str,
+        json_mode: bool = False,
+        temperature: float = 0.7
+    ) -> Any:
+        """
+        Groq API 呼叫（OpenAI 相容格式）
+        使用 llama-3.1-70b-versatile 作為備援模型
+        """
+        client = self._get_groq_client()
+        model = settings.GROQ_MODEL
+
+        logger.info("🔄 使用 Groq 備援模型: %s", model)
+
+        kwargs: Dict[str, Any] = {
+            "model": model,
+            "messages": [{"role": "user", "content": prompt}],
+            "temperature": temperature,
+            "max_tokens": 2048,
+        }
+        if json_mode:
+            kwargs["response_format"] = {"type": "json_object"}
+
+        try:
+            response = await asyncio.to_thread(
+                client.chat.completions.create, **kwargs
+            )
+            content = response.choices[0].message.content.strip()
+
+            if json_mode:
+                try:
+                    return json.loads(content)
+                except json.JSONDecodeError:
+                    logger.error("Groq JSON 解析失敗，原始內容: %s", content)
+                    return {}
+
+            return content
+
+        except Exception as e:
+            logger.error("Groq AI 呼叫失敗: %s", str(e))
+            return None
+
+    async def _call_ai(
+        self,
+        prompt: str,
+        json_mode: bool = False,
+        temperature: float = 0.7
+    ) -> Any:
+        """
+        統一 AI 呼叫入口：先嘗試 Gemini，失敗時自動切換至 Groq 備援
+        """
+        # 嘗試 Gemini
+        try:
+            result = await self._call_gemini(prompt, json_mode, temperature)
+            if result is not None:
+                logger.info("✅ 使用 Gemini (%s) 完成請求", self.model_name)
+                return result
+            logger.warning("Gemini 回傳 None，嘗試 Groq 備援")
+        except RuntimeError as e:
+            # 配額用盡等不可恢復錯誤
+            logger.warning("Gemini 不可用 (%s)，嘗試 Groq 備援", str(e))
+        except Exception as e:
+            logger.warning("Gemini 發生錯誤 (%s)，嘗試 Groq 備援", str(e))
+
+        # 嘗試 Groq 備援
+        if not settings.GROQ_ENABLED or not settings.GROQ_API_KEY:
+            raise RuntimeError("AI 服務配額已用盡，且 Groq 備援未設定。請稍後再試或升級 API 方案。")
+
+        result = await self._call_groq(prompt, json_mode, temperature)
+        if result is not None:
+            logger.info("✅ 使用 Groq (%s) 備援完成請求", settings.GROQ_MODEL)
+            return result
+
+        raise RuntimeError("所有 AI 服務均不可用（Gemini + Groq 皆失敗）")
+
     async def get_reply(self, user_message: str, system_prompt: str = None) -> str:
-        """
-        一般對話回覆（給 LINE Bot 直接回話用）
-        """
+        """一般對話回覆（給 LINE Bot 直接回話用）"""
         if not system_prompt:
             system_prompt = "你是一個熱心的教學助理，請用繁體中文回答學生的問題。"
 
         prompt = f"{system_prompt}\n\n學生訊息：{user_message}"
-        result = await self._call_gemini(prompt)
-        return result if result else "系統忙碌中，請稍後再試。"
+        try:
+            result = await self._call_ai(prompt)
+            return result if result else "系統忙碌中，請稍後再試。"
+        except RuntimeError:
+            return "系統忙碌中，請稍後再試。"
 
     async def analyze_question(self, question_text: str) -> Dict[str, Any]:
-        """
-        深度分析提問，回傳結構化 JSON
-        """
+        """深度分析提問，回傳結構化 JSON"""
         prompt = """你是一個教育數據分析師。請分析學生的提問，並回傳嚴格的 JSON 格式資料。
 欄位說明：
 - keywords: (list) 3-5個關鍵字
@@ -136,15 +214,16 @@ class AIService:
 
 學生提問：""" + question_text
 
-        result = await self._call_gemini(prompt, json_mode=True, temperature=0.3)
+        try:
+            result = await self._call_ai(prompt, json_mode=True, temperature=0.3)
+        except RuntimeError:
+            result = None
         if not result:
             return {"keywords": [], "difficulty_score": 0.0, "sentiment": "neutral", "summary": "分析失敗"}
         return result
 
     async def generate_response_draft(self, question_text: str) -> str:
-        """
-        生成教學回覆草稿
-        """
+        """生成教學回覆草稿"""
         prompt = """你是一位資深的教學助理。請針對學生的問題撰寫一份回覆草稿。
 要求：
 1. 語氣親切、鼓勵學生
@@ -153,7 +232,10 @@ class AIService:
 
 學生問題：""" + question_text
 
-        result = await self._call_gemini(prompt, temperature=0.7)
+        try:
+            result = await self._call_ai(prompt, temperature=0.7)
+        except RuntimeError:
+            result = None
         return result if result else "無法生成草稿"
 
     async def perform_qa_answer_clustering(
@@ -215,7 +297,7 @@ class AIService:
 請對以下學生的回答進行教育診斷與分群：
 {indexed_text}"""
 
-        result = await self._call_gemini(prompt, json_mode=True, temperature=0.5)
+        result = await self._call_ai(prompt, json_mode=True, temperature=0.5)
 
         if not result:
             return {"clusters": []}

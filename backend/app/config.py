@@ -37,6 +37,11 @@ class Settings(BaseSettings):
     GEMINI_RETRY_BASE_DELAY: float = 1.0
     GEMINI_TIMEOUT_SECONDS: float = 30.0
     
+    # Groq 備援 AI（Gemini 不可用時自動切換）
+    GROQ_API_KEY: str = ""
+    GROQ_MODEL: str = "llama-3.1-70b-versatile"
+    GROQ_ENABLED: bool = True
+    
     class Config:
         env_file = ".env"
         case_sensitive = True
