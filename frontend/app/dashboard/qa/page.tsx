@@ -45,7 +45,6 @@ import { qasApi, coursesApi, questionsApi, type Course } from "@/lib/api";
 import { aiApi } from "@/lib/api/ai"; 
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/contexts/auth-context";
-import { useRouter } from "next/navigation"; 
 
 interface QAItem {
   id: string;
@@ -68,7 +67,6 @@ interface QAItem {
 export default function QAPage() {
   const { toast } = useToast();
   const { user } = useAuth();
-  const router = useRouter(); 
   const [qaList, setQaList] = useState<QAItem[]>([]);
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedQA, setSelectedQA] = useState<QAItem | null>(null);
@@ -139,7 +137,7 @@ export default function QAPage() {
   useEffect(() => {
     const fetchCourses = async () => {
       try {
-        const response = await coursesApi.getAll();
+        const response = await coursesApi.getAll({ is_active: true });
         setCourseList(response);
         const courseMap = new Map<string, string>();
         response.forEach((course) => {
@@ -261,12 +259,11 @@ export default function QAPage() {
       const success = await aiApi.runClustering(courseId, 5, qaId);
       if (success) {
         toast({
-          title: "AI 批閱已啟動 ⚡",
-          description: "正在背景診斷學生的新回答，請前往「AI 聚類」頁面查看結果！",
+          title: "AI 批閱完成 ⚡",
+          description: "診斷結果已更新，可前往「AI 聚類」頁面查看詳細分群。",
         });
-        setTimeout(() => {
-          router.push("/dashboard/clustering");
-        }, 1500);
+        // 重新載入回覆以顯示更新後的 cluster 標記
+        loadReplies(qaId);
       } else {
         toast({ title: "啟動失敗", description: "無法啟動 AI 批閱任務", variant: "destructive" });
       }
@@ -285,12 +282,10 @@ export default function QAPage() {
       const success = await aiApi.runClustering(selectedQA.courseId, 5, selectedQA.id, true);
       if (success) {
         toast({
-          title: "重新批閱已啟動 ⚡",
-          description: "正在全面重新診斷所有已通過的回答，請前往「AI 聚類」頁面查看結果！",
+          title: "重新批閱完成 ⚡",
+          description: "已全面重新診斷所有已通過的回答，可前往「AI 聚類」頁面查看詳細分群。",
         });
-        setTimeout(() => {
-          router.push("/dashboard/clustering");
-        }, 1500);
+        loadReplies(selectedQA.id);
       } else {
         toast({ title: "啟動失敗", description: "無法啟動 AI 批閱任務", variant: "destructive" });
       }

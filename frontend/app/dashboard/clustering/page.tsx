@@ -60,7 +60,7 @@ export default function ClusteringPage() {
   useEffect(() => {
     const loadCourses = async () => {
       try {
-        const data = await coursesApi.getAll()
+        const data = await coursesApi.getAll({ is_active: true })
         setCourses(data)
         if (data.length > 0) {
           setSelectedCourse(data[0]._id || "")
