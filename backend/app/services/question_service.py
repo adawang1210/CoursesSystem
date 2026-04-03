@@ -45,10 +45,11 @@ class QuestionService:
                     
                     # 如果老師有設定次數限制 (大於 0)
                     if max_attempts is not None and max_attempts > 0:
-                        # 查詢該學生 (pseudonym) 在這題已作答的次數
+                        # 查詢該學生 (pseudonym) 在這題已作答的次數（不計退回的）
                         existing_count = await collection.count_documents({
                             "reply_to_qa_id": qa_id,
-                            "pseudonym": pseudonym
+                            "pseudonym": pseudonym,
+                            "review_status": {"$ne": "rejected"}
                         })
                         
                         if existing_count >= max_attempts:
@@ -133,7 +134,7 @@ class QuestionService:
         review_status: ReviewStatus,
         feedback: Optional[str] = None
     ) -> Optional[Dict[str, Any]]:
-        """更新學生的作答批閱狀態與評語"""
+        """更新學生的作答批閱狀態與評語，退回時通知學生可重新作答"""
         database = db.get_db()
         collection = database[self.collection_name]
         
@@ -150,7 +151,52 @@ class QuestionService:
             {"$set": update_data}
         )
         
-        return await self.get_question(question_id)
+        question = await self.get_question(question_id)
+
+        # 退回時透過 LINE 通知學生可重新作答
+        if question and review_status == ReviewStatus.REJECTED:
+            await self._notify_rejection(question, feedback)
+
+        return question
+
+    async def _notify_rejection(self, question: Dict[str, Any], feedback: Optional[str] = None):
+        """透過 LINE 推播通知學生作答被退回，可重新作答"""
+        from ..config import settings
+        if not settings.LINE_CHANNEL_ACCESS_TOKEN:
+            return
+
+        # 需要找到學生的 LINE user_id（從 pseudonym 反查 line_users）
+        database = db.get_db()
+        pseudonym = question.get("pseudonym")
+        if not pseudonym:
+            return
+
+        # 從 line_messages 找到該 pseudonym 對應的 user_id
+        msg_doc = await database["line_messages"].find_one({"pseudonym": pseudonym})
+        if not msg_doc or not msg_doc.get("user_id"):
+            return
+
+        user_id = msg_doc["user_id"]
+
+        feedback_text = f"\n\n💬 老師的評語：{feedback}" if feedback else ""
+        text = (
+            f"📋 您的作答已被老師退回，請重新作答。{feedback_text}\n\n"
+            f"🔄 請直接在此重新輸入您的答案即可。"
+        )
+
+        try:
+            from linebot.v3.messaging import (
+                Configuration, AsyncApiClient, AsyncMessagingApi,
+                PushMessageRequest, TextMessage,
+            )
+            configuration = Configuration(access_token=settings.LINE_CHANNEL_ACCESS_TOKEN)
+            async with AsyncApiClient(configuration) as api_client:
+                line_bot_api = AsyncMessagingApi(api_client)
+                await line_bot_api.push_message(
+                    PushMessageRequest(to=user_id, messages=[TextMessage(text=text)])
+                )
+        except Exception as e:
+            print(f"⚠️ 退回通知發送失敗: {e}")
 
     async def update_ai_analysis(
         self,

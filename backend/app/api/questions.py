@@ -117,6 +117,16 @@ async def batch_update_review_status(batch_data: ReviewStatusBatchUpdate):
         {"_id": {"$in": object_ids}},
         {"$set": update_fields}
     )
+
+    # 批量退回時逐一通知學生
+    if batch_data.review_status == "rejected":
+        for qid in batch_data.question_ids:
+            try:
+                question = await question_service.get_question(qid)
+                if question:
+                    await question_service._notify_rejection(question, batch_data.feedback)
+            except Exception as e:
+                print(f"⚠️ 批量退回通知失敗 (question_id={qid}): {e}")
     
     return {
         "success": True,
