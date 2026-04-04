@@ -58,6 +58,7 @@ interface QAItem {
   category?: string;
   isPublished: boolean;
   lastUpdated: string;
+  createdAt: string;
   allowReplies?: boolean;
   durationMinutes?: number;
   expiresAt?: string;
@@ -176,6 +177,9 @@ export default function QAPage() {
       lastUpdated: qa.updated_at
         ? new Date(ensureUTC(qa.updated_at)!).toLocaleDateString("zh-TW")
         : new Date(ensureUTC(qa.created_at) || "").toLocaleDateString("zh-TW"),
+      createdAt: qa.created_at
+        ? new Date(ensureUTC(qa.created_at)!).toLocaleString("zh-TW", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" })
+        : "",
       allowReplies: qa.allow_replies,
       durationMinutes: qa.duration_minutes,
       expiresAt: ensureUTC(qa.expires_at),
@@ -614,6 +618,15 @@ export default function QAPage() {
                           )
                         ) : (
                           <span className="text-[10px] bg-gray-200 text-gray-500 px-1.5 py-0.5 rounded whitespace-nowrap shrink-0">已結束</span>
+                        )}
+                      </div>
+                      <div className="flex items-center gap-3 mb-2 text-[11px] text-muted-foreground">
+                        {selectedQA.createdAt && <span>建立：{selectedQA.createdAt}</span>}
+                        {selectedQA.expiresAt && (
+                          <span>結束：{new Date(selectedQA.expiresAt).toLocaleString("zh-TW", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" })}</span>
+                        )}
+                        {selectedQA.allowReplies && !selectedQA.expiresAt && isQAActive(selectedQA) && (
+                          <span>結束：手動關閉</span>
                         )}
                       </div>
                       <div className="grid grid-cols-2 gap-3">
