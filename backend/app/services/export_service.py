@@ -50,30 +50,35 @@ class ExportService:
         output = io.StringIO()
         writer = csv.writer(output)
         
-        # 寫入標題列 (符合新版作答紀錄)
+        # 預先查詢 cluster 名稱對照表
+        cluster_ids = list(set(q.get("cluster_id") for q in questions if q.get("cluster_id")))
+        cluster_names = {}
+        if cluster_ids:
+            from bson import ObjectId as ObjId
+            valid_ids = [ObjId(cid) for cid in cluster_ids if cid]
+            if valid_ids:
+                clusters_cursor = database["clusters"].find({"_id": {"$in": valid_ids}})
+                async for c in clusters_cursor:
+                    cluster_names[str(c["_id"])] = c.get("topic_label", "")
+        
         writer.writerow([
-            "作答紀錄ID", "所屬Q&A任務ID", "去識別化代號", "學生作答內容", 
-            "AI聚類ID", "難度分數", "難度等級", "關鍵字", 
-            "AI回答草稿", "AI摘要", "建立時間", "更新時間"
+            "學號", "學生作答內容", "批閱狀態", "老師評語",
+            "AI 分群名稱", "作答時間"
         ])
         
-        # 寫入資料列
         for q in questions:
-            keywords = q.get("keywords") or []
+            status = q.get("review_status", "pending")
+            status_label = {"pending": "待批閱", "approved": "通過", "rejected": "退回"}.get(status, status)
+            cluster_id = q.get("cluster_id", "")
+            cluster_label = cluster_names.get(cluster_id, "") if cluster_id else ""
             
             writer.writerow([
-                str(q["_id"]),
-                q.get("reply_to_qa_id", ""),
-                q.get("pseudonym", "匿名"),
-                q.get("question_text", ""), # 仍為 question_text 欄位
-                q.get("cluster_id", ""),
-                q.get("difficulty_score", ""),
-                q.get("difficulty_level", ""),
-                ", ".join(keywords),
-                q.get("ai_response_draft", ""),
-                q.get("ai_summary", ""),
-                format_datetime(q.get("created_at")) if q.get("created_at") else "",
-                format_datetime(q.get("updated_at")) if q.get("updated_at") else ""
+                q.get("student_id", "") or "",
+                q.get("question_text", ""),
+                status_label,
+                q.get("feedback", "") or "",
+                cluster_label,
+                format_datetime(q.get("created_at")) if q.get("created_at") else ""
             ])
         
         csv_content = output.getvalue()
