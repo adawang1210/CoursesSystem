@@ -189,6 +189,11 @@ class LineService:
             
         course_code = parts[1].strip()
         student_id = parts[2].strip()
+        
+        # 學號格式驗證：必須是 9 碼數字
+        if not student_id.isdigit() or len(student_id) != 9:
+            await self._reply_text(reply_token, "⚠️ 學號格式錯誤！學號必須是 9 碼數字。\n例如：綁定 113A 111400000")
+            return
         # ========================================================
         
         course = None
