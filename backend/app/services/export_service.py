@@ -130,11 +130,11 @@ class ExportService:
         self,
         course_id: str,
         class_id: Optional[str] = None,
-        start_date: Optional[datetime] = None, # 🔥 新增時間參數
-        end_date: Optional[datetime] = None    # 🔥 新增時間參數
+        start_date: Optional[datetime] = None,
+        end_date: Optional[datetime] = None
     ) -> str:
         """
-        匯出 Q&A 任務資料為 CSV 格式 (包含學生作答紀錄)
+        匯出 Q&A 任務 + 學生作答明細為 CSV 格式（每筆回覆一列）
         """
         database = db.get_db()
         qa_collection = database["qas"]
@@ -143,20 +143,18 @@ class ExportService:
         query: Dict[str, Any] = {"course_id": course_id}
         if class_id:
             query["$or"] = [{"class_id": class_id}, {"class_id": None}]
-
         query.update(build_date_range_query(start_date, end_date))
         
         cursor = qa_collection.find(query).sort("created_at", -1)
         qas = await cursor.to_list(length=None)
         
-        # Batch query all replies for all QAs
         qa_ids = [str(qa["_id"]) for qa in qas]
         all_replies_cursor = question_collection.find(
             {"reply_to_qa_id": {"$in": qa_ids}}
         ).sort("created_at", 1)
         all_replies = await all_replies_cursor.to_list(length=None)
         
-        replies_map = {}
+        replies_map: Dict[str, list] = {}
         for r in all_replies:
             qa_id = r.get("reply_to_qa_id")
             replies_map.setdefault(qa_id, []).append(r)
@@ -165,44 +163,31 @@ class ExportService:
         writer = csv.writer(output)
         
         writer.writerow([
-            "任務 ID", "任務問題", "標準答案/批閱基準", "分類", "標籤", "是否發布",
-            "發布時間", "建立者", "建立時間", "學生回覆內容" 
+            "任務問題", "核心觀念", "學號", "學生作答", 
+            "批閱狀態", "老師評語", "作答時間"
         ])
         
         for qa in qas:
             qa_id_str = str(qa["_id"])
-            tags = qa.get("tags") or []
-            
-            # Use pre-fetched replies from map
+            question_text = qa.get("question", "")
+            core_concept = qa.get("core_concept", "") or qa.get("answer", "")
             replies = replies_map.get(qa_id_str, [])
             
-            # 將學生的回覆組合成單一字串排版
-            formatted_replies = []
-            for r in replies:
-                r_time = r.get("created_at")
-                r_time_str = format_datetime(r_time) if r_time else ""
-                r_pseudo = r.get("pseudonym", "匿名")
-                
-                # 將換行符號替換掉，避免 CSV 排版大亂
-                r_text = str(r.get("question_text", "")).replace('\n', ' ').replace('\r', '')
-                
-                formatted_replies.append(f"[{r_pseudo} {r_time_str}] {r_text}")
-                
-            # 若無人回覆則顯示提示
-            replies_str = "\n".join(formatted_replies) if formatted_replies else "無學生回覆"
-
-            writer.writerow([
-                qa_id_str,
-                qa.get("question", ""),
-                qa.get("answer", ""),
-                qa.get("category", ""),
-                ", ".join(tags),
-                "是" if qa.get("is_published", False) else "否",
-                format_datetime(qa.get("publish_date")) if qa.get("publish_date") else "",
-                qa.get("created_by", ""),
-                format_datetime(qa.get("created_at")) if qa.get("created_at") else "",
-                replies_str 
-            ])
+            if not replies:
+                writer.writerow([question_text, core_concept, "", "（無學生回覆）", "", "", ""])
+            else:
+                for r in replies:
+                    status = r.get("review_status", "pending")
+                    status_label = {"pending": "待批閱", "approved": "通過", "rejected": "退回"}.get(status, status)
+                    writer.writerow([
+                        question_text,
+                        core_concept,
+                        r.get("student_id", "") or "",
+                        r.get("question_text", ""),
+                        status_label,
+                        r.get("feedback", "") or "",
+                        format_datetime(r.get("created_at")) if r.get("created_at") else ""
+                    ])
         
         csv_content = output.getvalue()
         output.close()
