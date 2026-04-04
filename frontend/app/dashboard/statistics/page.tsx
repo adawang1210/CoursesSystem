@@ -163,7 +163,8 @@ export default function StatisticsPage() {
         clusters: "AI批閱分析",
       };
       const dateStr = new Date().toISOString().slice(0, 10).replace(/-/g, "");
-      a.download = `${selectedCourseName}_${typeLabels[type]}_${dateStr}.csv`;
+      const qaLabel = selectedQaId ? `_${(qasList.find((q: any) => q._id === selectedQaId)?.question || "").slice(0, 20)}` : "";
+      a.download = `${selectedCourseName}${qaLabel}_${typeLabels[type]}_${dateStr}.csv`;
 
       document.body.appendChild(a);
       a.click();
