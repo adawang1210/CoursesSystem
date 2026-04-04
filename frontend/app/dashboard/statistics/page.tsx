@@ -321,10 +321,10 @@ export default function StatisticsPage() {
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6 p-4 bg-secondary/20 rounded-lg border">
                 <div>
                   <Label className="mb-2 block text-sm font-medium">指定 Q&A 問題 (可留空)</Label>
-                  <Select value={selectedQaId} onValueChange={setSelectedQaId}>
+                  <Select value={selectedQaId || "all"} onValueChange={(v) => setSelectedQaId(v === "all" ? "" : v)}>
                     <SelectTrigger><SelectValue placeholder="全部問題" /></SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="">全部問題</SelectItem>
+                      <SelectItem value="all">全部問題</SelectItem>
                       {qasList.map((qa: any) => (
                         <SelectItem key={qa._id} value={qa._id}>
                           {qa.question.length > 25 ? qa.question.substring(0, 25) + "..." : qa.question}
