@@ -35,6 +35,7 @@ import {
 import {
   reportsApi,
   coursesApi,
+  qasApi,
   type Statistics,
   type Course,
 } from "@/lib/api";
@@ -52,6 +53,8 @@ export default function StatisticsPage() {
   const [startDate, setStartDate] = useState<string>("");
   const [endDate, setEndDate] = useState<string>("");
   const [selectedClass, setSelectedClass] = useState<string>("");
+  const [qasList, setQasList] = useState<any[]>([]);
+  const [selectedQaId, setSelectedQaId] = useState<string>("");
   
   const { toast } = useToast();
 
@@ -63,8 +66,21 @@ export default function StatisticsPage() {
     if (selectedCourse) {
       loadStatistics();
       loadClusters();
+      loadQAs();
     }
   }, [selectedCourse]);
+
+  const loadQAs = async () => {
+    if (!selectedCourse) return;
+    try {
+      const qas = await qasApi.getAll({ course_id: selectedCourse });
+      const interactive = qas.filter((qa: any) => qa.allow_replies);
+      setQasList(interactive);
+      setSelectedQaId("");
+    } catch (error) {
+      console.error("載入 Q&A 列表失敗:", error);
+    }
+  };
 
   const loadCourses = async () => {
     try {
@@ -118,6 +134,7 @@ export default function StatisticsPage() {
       };
 
       if (selectedClass) baseParams.class_id = selectedClass;
+      if (selectedQaId) baseParams.qa_id = selectedQaId;
 
       switch (type) {
         case "questions":
@@ -134,10 +151,20 @@ export default function StatisticsPage() {
           break;
       }
 
+      // 使用後端回傳的 Content-Disposition filename，若無則用可讀名稱
       const url = window.URL.createObjectURL(blob!); 
       const a = document.createElement("a");
       a.href = url;
-      a.download = `${type}_${selectedCourse}_${new Date().getTime()}.csv`;
+
+      const typeLabels: Record<string, string> = {
+        questions: "作答明細",
+        qas: "QA紀錄",
+        statistics: "成效統計",
+        clusters: "AI批閱分析",
+      };
+      const dateStr = new Date().toISOString().slice(0, 10).replace(/-/g, "");
+      a.download = `${selectedCourseName}_${typeLabels[type]}_${dateStr}.csv`;
+
       document.body.appendChild(a);
       a.click();
       window.URL.revokeObjectURL(url);
@@ -291,7 +318,21 @@ export default function StatisticsPage() {
           <Card>
             <CardHeader><CardTitle>資料匯出與過濾設定</CardTitle></CardHeader>
             <CardContent>
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6 p-4 bg-secondary/20 rounded-lg border">
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6 p-4 bg-secondary/20 rounded-lg border">
+                <div>
+                  <Label className="mb-2 block text-sm font-medium">指定 Q&A 問題 (可留空)</Label>
+                  <Select value={selectedQaId} onValueChange={setSelectedQaId}>
+                    <SelectTrigger><SelectValue placeholder="全部問題" /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="">全部問題</SelectItem>
+                      {qasList.map((qa: any) => (
+                        <SelectItem key={qa._id} value={qa._id}>
+                          {qa.question.length > 25 ? qa.question.substring(0, 25) + "..." : qa.question}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
                 <div>
                   <Label className="mb-2 block text-sm font-medium">班級 / 分組過濾 (可留空)</Label>
                   <Input 

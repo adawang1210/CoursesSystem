@@ -19,7 +19,8 @@ class ExportService:
         class_id: Optional[str] = None,
         cluster_id: Optional[str] = None,
         start_date: Optional[datetime] = None,
-        end_date: Optional[datetime] = None
+        end_date: Optional[datetime] = None,
+        qa_id: Optional[str] = None
     ) -> str:
         """
         匯出學生作答明細資料為 CSV 格式 (包含 AI 分析欄位)
@@ -27,8 +28,10 @@ class ExportService:
         database = db.get_db()
         collection = database["questions"]
         
-        # 建立多維度查詢條件 (已移除舊版的 status 過濾，因為現在是實體刪除)
         query: Dict[str, Any] = {"course_id": course_id}
+        
+        if qa_id:
+            query["reply_to_qa_id"] = qa_id
         
         if class_id:
             query["class_id"] = class_id

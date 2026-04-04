@@ -111,6 +111,7 @@ async def get_clusters_summary(course_id: str = Query(..., description="課程ID
 @router.get("/export/questions", summary="匯出提問資料 CSV")
 async def export_questions_csv(
     course_id: str = Query(..., description="課程ID"),
+    qa_id: Optional[str] = Query(None, description="Q&A 任務ID"),
     class_id: Optional[str] = Query(None, description="班級ID"),
     cluster_id: Optional[str] = Query(None, description="聚類ID (篩選特定主題)"),
     start_date: Optional[str] = Query(None, description="開始日期 (YYYY-MM-DD)"),
@@ -122,14 +123,27 @@ async def export_questions_csv(
         
         csv_content = await export_service.export_questions_to_csv(
             course_id=course_id, class_id=class_id, cluster_id=cluster_id, 
-            start_date=start_dt, end_date=end_dt
+            start_date=start_dt, end_date=end_dt, qa_id=qa_id
         )
         
-        filename = f"questions_{course_id}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
+        # 用課程名稱和日期命名
+        database = db.get_db()
+        course = await database["courses"].find_one({"_id": __import__("bson").ObjectId(course_id)})
+        course_name = course["course_name"] if course else course_id
+        qa_label = ""
+        if qa_id:
+            qa_doc = await database["qas"].find_one({"_id": __import__("bson").ObjectId(qa_id)})
+            if qa_doc:
+                q_text = qa_doc.get("question", "")[:20]
+                qa_label = f"_{q_text}"
+        
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M')
+        filename = f"{course_name}{qa_label}_作答明細_{timestamp}.csv"
+        
         return Response(
             content=csv_content.encode('utf-8-sig'),
             media_type="text/csv",
-            headers={"Content-Disposition": f"attachment; filename={filename}"}
+            headers={"Content-Disposition": f"attachment; filename*=UTF-8''{__import__('urllib.parse', fromlist=['quote']).quote(filename)}"}
         )
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"匯出失敗: {str(e)}")
@@ -138,11 +152,15 @@ async def export_questions_csv(
 async def export_clusters_csv(course_id: str = Query(..., description="課程ID")):
     try:
         csv_content = await export_service.export_clusters_to_csv(course_id=course_id)
-        filename = f"clusters_analysis_{course_id}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
+        database = db.get_db()
+        course = await database["courses"].find_one({"_id": __import__("bson").ObjectId(course_id)})
+        course_name = course["course_name"] if course else course_id
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M')
+        filename = f"{course_name}_AI批閱分析_{timestamp}.csv"
         return Response(
             content=csv_content.encode('utf-8-sig'),
             media_type="text/csv",
-            headers={"Content-Disposition": f"attachment; filename={filename}"}
+            headers={"Content-Disposition": f"attachment; filename*=UTF-8''{__import__('urllib.parse', fromlist=['quote']).quote(filename)}"}
         )
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"匯出失敗: {str(e)}")
@@ -156,11 +174,15 @@ async def export_qas_csv(
 ):
     try:
         csv_content = await export_service.export_qas_to_csv(course_id, class_id, start_date, end_date)
-        filename = f"qas_{course_id}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
+        database = db.get_db()
+        course = await database["courses"].find_one({"_id": __import__("bson").ObjectId(course_id)})
+        course_name = course["course_name"] if course else course_id
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M')
+        filename = f"{course_name}_QA紀錄_{timestamp}.csv"
         return Response(
             content=csv_content.encode('utf-8-sig'),
             media_type="text/csv",
-            headers={"Content-Disposition": f"attachment; filename={filename}"}
+            headers={"Content-Disposition": f"attachment; filename*=UTF-8''{__import__('urllib.parse', fromlist=['quote']).quote(filename)}"}
         )
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"匯出失敗: {str(e)}")
@@ -174,11 +196,15 @@ async def export_statistics_csv(
 ):
     try:
         csv_content = await export_service.export_statistics_to_csv(course_id, class_id, start_date, end_date)
-        filename = f"statistics_{course_id}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
+        database = db.get_db()
+        course = await database["courses"].find_one({"_id": __import__("bson").ObjectId(course_id)})
+        course_name = course["course_name"] if course else course_id
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M')
+        filename = f"{course_name}_成效統計_{timestamp}.csv"
         return Response(
             content=csv_content.encode('utf-8-sig'),
             media_type="text/csv",
-            headers={"Content-Disposition": f"attachment; filename={filename}"}
+            headers={"Content-Disposition": f"attachment; filename*=UTF-8''{__import__('urllib.parse', fromlist=['quote']).quote(filename)}"}
         )
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"匯出失敗: {str(e)}")

@@ -64,6 +64,7 @@ export const reportsApi = {
    */
   async exportQuestions(params: {
     course_id: string;
+    qa_id?: string;
     class_id?: string;
     start_date?: string;
     end_date?: string;
